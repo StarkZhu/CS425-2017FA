@@ -1,5 +1,6 @@
 from xmlrpc.server import SimpleXMLRPCServer
 from xmlrpc.server import SimpleXMLRPCRequestHandler
+import subprocess
 
 # Restrict to a particular path.
 class RequestHandler(SimpleXMLRPCRequestHandler):
@@ -18,6 +19,20 @@ with SimpleXMLRPCServer(("0.0.0.0", 8000),
     def adder_function(x,y):
         return x + y
     server.register_function(adder_function, 'add')
+
+    def dgrep(path, regEx):
+        #command = ['cat', path, '|', 'grep', regEx]
+        #p = subprocess.run(command, stdout=subprocess.PIPE)
+        #text = p.stdout.read()
+        #retcode = p.wait()
+        command = 'cat ' + path + ' | grep ' + regEx
+        print(command)
+        text = subprocess.getoutput(command)
+
+        return text
+    server.register_function(dgrep, 'dgrep')
+
+        
 
     # Register an instance; all the methods of the instance are
     # published as XML-RPC methods (in this case, just 'mul').

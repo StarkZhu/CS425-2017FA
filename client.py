@@ -1,9 +1,8 @@
 import xmlrpc.client
 
 s = xmlrpc.client.ServerProxy('http://localhost:8000')
-print(s.pow(2,3))  # Returns 2**3 = 8
-print(s.add(2,3))  # Returns 5
-print(s.mul(5,2))  # Returns 5*2 = 10
+
+print(s.dgrep('/Users/dlei/cs425/lbl-pkt-4.sf', '790528000'))
 
 # Print list of available methods
 print(s.system.listMethods())
