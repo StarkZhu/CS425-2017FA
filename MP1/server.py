@@ -1,6 +1,8 @@
 from xmlrpc.server import SimpleXMLRPCServer
 from xmlrpc.server import SimpleXMLRPCRequestHandler
 import subprocess
+import random
+
 
 # Restrict to a particular path.
 class RequestHandler(SimpleXMLRPCRequestHandler):
@@ -32,7 +34,30 @@ with SimpleXMLRPCServer(("0.0.0.0", 8000),
         return text
     server.register_function(dgrep, 'dgrep')
 
+    def generate_log(server_id):
+        # supposing we are generating 102 line each server
+        file = open('machine.{}.log'.format(server_id), 'w')
         
+        # unique pattern per machine 
+        file.write("This is machine-{}\n".format(server_id))
+
+        # frequent pattern 
+        for i in range(0, 80):
+            hash = random.getrandbits(128)
+            file.write("frequent_pattern_{%016x}\n" % hash)
+
+        # somewhat frequent pattern 
+        for i in range(0, 20):
+            hash = random.getrandbits(128)
+            file.write("somewhat_{%016x}\n" % hash)
+
+        # only in even machines
+        if server_id % 2 == 0:
+            file.write("EVEN\n")
+
+        return 0
+
+    server.register_function(generate_log, 'glog')
 
     # Register an instance; all the methods of the instance are
     # published as XML-RPC methods (in this case, just 'mul').
