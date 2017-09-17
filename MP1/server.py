@@ -2,7 +2,8 @@ from xmlrpc.server import SimpleXMLRPCServer
 from xmlrpc.server import SimpleXMLRPCRequestHandler
 import subprocess
 import random
-
+import base64
+from xml.sax.saxutils import escape
 
 # Restrict to a particular path.
 class RequestHandler(SimpleXMLRPCRequestHandler):
@@ -13,25 +14,34 @@ with SimpleXMLRPCServer(("0.0.0.0", 8000),
                         requestHandler=RequestHandler) as server:
     server.register_introspection_functions()
 
-    # Register pow() function; this will use the value of
-    # pow.__name__ as the name, which is just 'pow'.
-    server.register_function(pow)
-
     # Register a function under a different name
-    def adder_function(x,y):
-        return x + y
-    server.register_function(adder_function, 'add')
 
     def dgrep(path, regEx):
-        #command = ['cat', path, '|', 'grep', regEx]
-        #p = subprocess.run(command, stdout=subprocess.PIPE)
-        #text = p.stdout.read()
-        #retcode = p.wait()
         command = 'cat ' + path + ' | grep ' + regEx
         print(command)
-        text = subprocess.getoutput(command)
+        #text = subprocess.getoutput(command)
+        
+        text = subprocess.run(
+            command, 
+            stdout=subprocess.PIPE, 
+            shell=True,
+            encoding='utf-8', 
+            errors='replace',
+        ).stdout
+        
+        """
+        text = subprocess.check_output(
+            command, 
+            shell=True,
+            encoding='utf-8', 
+            errors='replace',
+        )
+        """
+        # print()
+        # return result.stdout
 
-        return text
+        return base64.b64encode(text.encode('utf-8'))
+        # return text
     server.register_function(dgrep, 'dgrep')
 
     def generate_log(server_id):
@@ -39,7 +49,7 @@ with SimpleXMLRPCServer(("0.0.0.0", 8000),
         file = open('machine.{}.log'.format(server_id), 'w')
         
         # unique pattern per machine 
-        file.write("This is machine-{}\n".format(server_id))
+        file.write("This is machine-{}.\n".format(server_id))
 
         # frequent pattern 
         for i in range(0, 80):
