@@ -1,9 +1,9 @@
 from xmlrpc.server import SimpleXMLRPCServer
 from xmlrpc.server import SimpleXMLRPCRequestHandler
+from xml.sax.saxutils import escape
 import subprocess
 import random
 import base64
-from xml.sax.saxutils import escape
 
 # Restrict to a particular path.
 class RequestHandler(SimpleXMLRPCRequestHandler):
@@ -15,11 +15,9 @@ with SimpleXMLRPCServer(("0.0.0.0", 8000),
     server.register_introspection_functions()
 
     # Register a function under a different name
-
     def dgrep(path, regEx):
         command = 'cat ' + path + ' | grep ' + regEx
         print(command)
-        #text = subprocess.getoutput(command)
         
         text = subprocess.run(
             command, 
@@ -28,20 +26,8 @@ with SimpleXMLRPCServer(("0.0.0.0", 8000),
             encoding='utf-8', 
             errors='replace',
         ).stdout
-        
-        """
-        text = subprocess.check_output(
-            command, 
-            shell=True,
-            encoding='utf-8', 
-            errors='replace',
-        )
-        """
-        # print()
-        # return result.stdout
 
         return base64.b64encode(text.encode('utf-8'))
-        # return text
     server.register_function(dgrep, 'dgrep')
 
     def generate_log(server_id):
@@ -68,14 +54,6 @@ with SimpleXMLRPCServer(("0.0.0.0", 8000),
         return 0
 
     server.register_function(generate_log, 'glog')
-
-    # Register an instance; all the methods of the instance are
-    # published as XML-RPC methods (in this case, just 'mul').
-    class MyFuncs:
-        def mul(self, x, y):
-            return x * y
-
-    server.register_instance(MyFuncs())
 
     # Run the server's main loop
     server.serve_forever()

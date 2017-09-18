@@ -77,7 +77,7 @@ if __name__ == '__main__':
 	total_count = 0
 	line_counts = []
 	for i, s in enumerate(result):
-		f = open('./outputs/' + str(i+1) +'.output', 'w+')
+		f = open('/home/cs425/MP1/outputs/' + str(i+1) +'.output', 'w+')
 		# counting and adding number of results found for each machine
 		individual_result = result[i].splitlines()
 		line_counts.append(len(individual_result));
