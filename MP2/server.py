@@ -22,8 +22,8 @@ neighbors = []
 recent_removed = []
 false_positive_count = 0
 
-UDP_LOST_RATE = 10
-MACHINE_NUM = 2
+UDP_LOST_RATE = 0
+MACHINE_NUM = 5
 ALIVE = False
 HEARTBEAT_PERIOD = 1.0
 GRACE_PERIOD = 2.0
@@ -157,10 +157,10 @@ def detect_failure():
             recent_removed.append(member)
             member_list.remove(member)
             false_positive_count += 1
-            logging.info("Time[{}]: {} has gone offline".format(time.time(), member[0]))
+            logging.info("Time[{}]: {} has gone offline, current member_list: {}".format(time.time(), member[0], member_list))
             logging.debug("recent_removed: {}".format(recent_removed))
-            logging.info("false_positive_count = {}".format(false_positive_count))
-            logging.info(member_list)
+            logging.debug("false_positive_count = {}".format(false_positive_count))
+            logging.debug(member_list)
     update_neighbors()
 
 # check the sorted member_list and find out all 4 neighbors of myself
@@ -213,12 +213,14 @@ def merge_member_list(remote_member_list):
                 member_list[j] = (member_list[j][0], remote_member_list[i][1], cur_time)
             j+=1
         else:
-            # my member_list is not deplaying a machine that appears in others' list
+            # my member_list is not displaying a machine that appears in others' list
             tmpList = [m[0] for m in recent_removed]
             domain_name = remote_member_list[i][0]
             if domain_name not in tmpList or recent_removed[tmpList.index(domain_name)][1] < remote_member_list[i][1]:
                 # only append it if it is not a machine recently detected to be offline
                 member_list.append(remote_member_list[i])
+                if domain_name not in tmpList:
+                    logging.info("Time[{}]: {} is joining.".format(time.time(), domain_name))
 
     member_list = sorted(member_list, key=itemgetter(0))
     update_neighbors()
@@ -246,7 +248,7 @@ def run_udp_server():
 
 def handle_leave_request(leaver_ip):
     global member_list
-    logging.info("Time[{}]: {} volunterally left".format(time.time(), leaver_ip))
+    logging.info("Time[{}]: {} volunterally left, current member_list: {}".format(time.time(), leaver_ip, member_list))
     leaver_index = [m[0] for m in member_list].index(leaver_ip)
     recent_removed.append(member_list[leaver_index])
     member_list.pop(leaver_index)
@@ -304,13 +306,16 @@ def leave():
     ALIVE = False
     clientSocket = socket(AF_INET, SOCK_DGRAM)
     clientSocket.settimeout(1)
+    reset_member_list = []
     for member in member_list:
+        reset_member_list.append((member[0], 0, time.time()))
         if member[0] == getfqdn():
             continue
         addr = (gethostbyname(member[0]), 9000)
         msg_orig = [('leave', getfqdn())]
         msg = get_encoded_msg(msg_orig)
         clientSocket.sendto(msg, addr)
+    member_list = reset_member_list
 
 # action: join system, contact introducer
 def init_join():
@@ -322,9 +327,10 @@ def init_join():
     addr = (gethostbyname(INTRODUCER), 9000)
     msg_orig = [('join', getfqdn())]
     msg = get_encoded_msg(msg_orig) 
-    while len(member_list) < MACHINE_NUM:
+    while len(member_list) < MACHINE_NUM or member_list[0][1] < 1:
         clientSocket.sendto(msg, addr)
         time.sleep(1)
+    #ALIVE = True
     #introducer = get_tcp_client_handle(INTRODUCER)
     #introducer.ask_for_join(getfqdn())
 
