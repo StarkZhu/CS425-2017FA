@@ -3,6 +3,7 @@ import threading
 import sys 
 import time
 import base64
+import os
 import traceback
 
 # for debug use
@@ -76,8 +77,12 @@ if __name__ == '__main__':
 
 	total_count = 0
 	line_counts = []
+	directory = "/home/cs425/MP1/outputs"
+	if not os.path.exists(directory):
+		os.makedirs(directory)
+
 	for i, s in enumerate(result):
-		f = open('/home/cs425/MP1/outputs/' + str(i+1) +'.output', 'w+')
+		f = open('/home/cs425/MP1/outputs/' + str(i+1) +'.output', 'w')
 		# counting and adding number of results found for each machine
 		individual_result = result[i].splitlines()
 		line_counts.append(len(individual_result));

@@ -7,7 +7,7 @@ This is the implementation of MP1.
 
 ===QUERY===
 python3.6 MP1/client.py $file_path $reg_ex
-Output will be redirected to outputs folder
+Output will be redirected to MP1/outputs folder
 
 ===TEST===
 python3.6 MP1/test.py
