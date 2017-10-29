@@ -10,6 +10,9 @@ import base64
 import xmlrpc.client
 from threading import Thread
 import logging
+import signal
+from sdfs import SDFS_Master, SDFS_Slave
+from timeout import Timeout
 
 # Restrict to a particular path.
 class RequestHandler(SimpleXMLRPCRequestHandler):
@@ -23,13 +26,15 @@ recent_removed = []
 false_positive_count = 0
 
 UDP_LOST_RATE = 0
-MACHINE_NUM = 5
+MACHINE_NUM = 3
 ALIVE = False
 HEARTBEAT_PERIOD = 1.0
 GRACE_PERIOD = 2.0
 REJOIN_COOLDOWN = 12.0
 
-
+sdfs = SDFS_Slave()
+sdfs_master = SDFS_Master()
+TRANSFER_IN_PROGRESS = {}
 
 # ------------------------- distributed grep
 
@@ -40,7 +45,7 @@ def run_tcp_server():
         server.register_introspection_functions()
 
         def ping():
-            logging.debug("ping")
+            logging.info("ping")
             return "pong"
         server.register_function(ping, 'ping')
 
@@ -82,8 +87,84 @@ def run_tcp_server():
                 file.write("EVEN\n")
 
             return 0
-
         server.register_function(generate_log, 'glog')
+
+        def request_put(sdfsfilename, requester_ip):
+            # check when last time updated this file
+
+            if sdfs_master.file_updated_recently(sdfsfilename):
+                
+                # ask for confirmation 
+                try:
+                    with Timeout(30):
+                        requester_handle = get_tcp_client_handle(requester_ip)
+                        if not requester_handle.confirmation_handler():
+                            return False
+
+                except Timeout.Timeout:
+                    # abadon operation
+                    return False
+            
+            # get 3 target node and send to them the file
+            print(requester_ip)
+            put_info = sdfs_master.handle_put_request(sdfsfilename)
+            print(requester_ip)
+            # return ack to requester
+            return put_info
+
+        server.register_function(request_put, 'request_put')
+
+        def request_get(sdfsfilename):
+            # look up who has the file
+            # send reqeust to get the file
+            return False 
+        server.register_function(request_get, 'request_get')
+
+        def request_delete(sdfsfilename):
+            # look up who has file 
+            # send request to delete the file
+            return False
+        server.register_function(request_delete, 'request_delete')   
+
+        def confirmation_handler():
+            try:
+                with Timeout(30):
+                    command = input('This file was recently updated, are you sure you want to proceed? (yes/no) ')
+
+                    if command == 'yes':
+                        return True
+                    else:
+                        return False
+
+            except Timeout.Timeout:
+                return False
+        server.register_function(confirmation_handler, 'confirmation_handler')
+        
+        def put_file(sdfs_filename, file, ver, requester_ip):
+            logging.info('put_file {} {}'.format(sdfs_filename, ver))
+            # file = file
+            file = file.data
+            sdfs.put_file(sdfs_filename, file, ver)
+
+            logging.info('Prep to return to requester {}'.format(requester_ip))
+            if requester_ip == getfqdn():
+                put_done(sdfs_filename, getfqdn())
+                return True
+
+            requester_handle = get_tcp_client_handle(requester_ip)
+            requester_handle.put_done(sdfs_filename, getfqdn())
+            return True
+
+        server.register_function(put_file, 'put_file')
+
+        def put_done(sdfs_filename, requester_ip):
+            logging.info('put_done {} {}'.format(sdfs_filename, requester_ip))
+            global TRANSFER_IN_PROGRESS
+            if sdfs_filename in TRANSFER_IN_PROGRESS:
+                TRANSFER_IN_PROGRESS[sdfs_filename] += 1
+
+            return True
+        server.register_function(put_done, 'put_done')
 
         # Run the server's main loop
         server.serve_forever()
@@ -105,6 +186,12 @@ def get_encoded_msg(msg_list):
 def get_decoded_member_list(s):
     text = base64.b64decode(s).decode("utf-8")
     return eval(text)
+
+def encode_binary(msg):
+    return base64.b64encode(msg)
+
+def decode_binary(msg):
+    return base64.b64decode(msg)
 # ------------------------- message utils
 
 
@@ -241,6 +328,8 @@ def send_heartbeat():
     clientSocket = socket(AF_INET, SOCK_DGRAM)
     clientSocket.settimeout(1)
     global ALIVE
+    global member_list
+
     while True:
         time.sleep(HEARTBEAT_PERIOD)
         # don't send heartbeat if volunterally leave the system or before whole system is initialized
@@ -259,12 +348,18 @@ def send_heartbeat():
             clientSocket.sendto(message, addr)
             has_sent[member_list[index][0]] = 1
 
+        # ask sdfs to check updated memberlist
+        global sdfs_master
+        sdfs_master.update_member_list(member_list)
+
 
 # go through member_list to check if any machine is offline
 def detect_failure():
     global member_list
     global recent_removed
     global false_positive_count  # this is used for calculating false positive rate, assuming no machine leave system volunterally
+    global sdfs
+
     cur_time = time.time()
     for member in member_list:
         if member[2] < cur_time - GRACE_PERIOD:
@@ -295,6 +390,10 @@ def cli():
             init_join()
         elif command == 'leave':
             leave()
+        elif command.startswith('put'):
+            args = command.split(' ')
+            print(args)
+            put(args[1], args[2])
         else:
             print("COMMAND NOT SUPPORTED")
 
@@ -330,6 +429,42 @@ def init_join():
     while len(member_list) < MACHINE_NUM or member_list[0][1] < 1:
         clientSocket.sendto(msg, addr)
         time.sleep(1)
+
+def put_to_replica(target_ip, local_filename, sdfs_filename, ver):
+    replica_handle = get_tcp_client_handle(target_ip)
+    with open(local_filename, 'rb') as f:
+        data = f.read()
+        # print(type(data))
+        replica_handle.put_file(sdfs_filename, xmlrpc.client.Binary(data), ver, getfqdn())
+
+def put(local_filename, sdfs_filename):
+    print(local_filename, sdfs_filename)
+    master_handle = get_tcp_client_handle(INTRODUCER)
+
+    put_info = master_handle.request_put(sdfs_filename, getfqdn())
+    print(put_info)
+
+    if not put_info:
+        print('Put operation aborted.')
+        return False
+
+    global TRANSFER_IN_PROGRESS
+    TRANSFER_IN_PROGRESS[sdfs_filename] = 0
+
+    ips = put_info['ips']
+    ver = put_info['ver']
+    for ip in ips:
+        p = Thread(target=put_to_replica, args=(ip, local_filename, sdfs_filename, ver))
+        p.start()
+
+    while True:
+        time.sleep(HEARTBEAT_PERIOD)
+        print('quorum count: ', TRANSFER_IN_PROGRESS[sdfs_filename])
+        if TRANSFER_IN_PROGRESS[sdfs_filename] >= 2:
+            print('Put %s@%d Done.' % (sdfs_filename, ver))
+            del TRANSFER_IN_PROGRESS[sdfs_filename]
+            return True
+
 # -------------------------- command line interface
 
 
@@ -343,9 +478,9 @@ if __name__=='__main__':
     logging.getLogger('').addHandler(console)
 
     udp_thread = Thread(target = run_udp_server)
-    tcp_thread = Thread(target = run_tcp_server)
+    # tcp_thread = Thread(target = run_tcp_server)
     udp_thread.start()
-    tcp_thread.start()
+    # tcp_thread.start()
 
     hb_thread = Thread(target = send_heartbeat)
     hb_thread.start()
@@ -354,7 +489,8 @@ if __name__=='__main__':
     cli_thread.start()
     init_join()
     
+    run_tcp_server()
     udp_thread.join()
-    tcp_thread.join()
+    # tcp_thread.join()
     hb_thread.join()
     cli_thread.join()
