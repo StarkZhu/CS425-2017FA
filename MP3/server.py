@@ -13,6 +13,7 @@ import logging
 import signal
 from sdfs import SDFS_Master, SDFS_Slave
 from timeout import Timeout
+from threading import Lock
 
 # Restrict to a particular path.
 class RequestHandler(SimpleXMLRPCRequestHandler):
@@ -35,6 +36,8 @@ REJOIN_COOLDOWN = 12.0
 sdfs = SDFS_Slave()
 sdfs_master = SDFS_Master()
 TRANSFER_IN_PROGRESS = {}
+
+lock = Lock()
 
 # ------------------------- distributed grep
 
@@ -89,7 +92,12 @@ def run_tcp_server():
             return 0
         server.register_function(generate_log, 'glog')
 
-        def request_put(sdfsfilename, requester_ip):
+# ------------------------- distributed grep
+
+
+# ------------------------- sdfs master functions
+
+        def put_file_info(sdfsfilename, requester_ip):
             # check when last time updated this file
 
             if sdfs_master.file_updated_recently(sdfsfilename):
@@ -112,20 +120,24 @@ def run_tcp_server():
             # return ack to requester
             return put_info
 
-        server.register_function(request_put, 'request_put')
+        server.register_function(put_file_info, 'put_file_info')
 
-        def request_get(sdfsfilename):
+        def get_file_info(sdfsfilename):
             # look up who has the file
             # send reqeust to get the file
-            return False 
-        server.register_function(request_get, 'request_get')
+            return sdfs_master.get_file_replica_list(sdfsfilename)
 
-        def request_delete(sdfsfilename):
+        server.register_function(get_file_info, 'get_file_info')
+
+        def delete_file_info(sdfsfilename):
             # look up who has file 
             # send request to delete the file
             return False
-        server.register_function(request_delete, 'request_delete')   
+        server.register_function(delete_file_info, 'delete_file_info')   
 
+# ------------------------- sdfs master functions
+
+# ------------------------- sdfs client functions
         def confirmation_handler():
             try:
                 with Timeout(30):
@@ -140,35 +152,56 @@ def run_tcp_server():
                 return False
         server.register_function(confirmation_handler, 'confirmation_handler')
         
-        def put_file(sdfs_filename, file, ver, requester_ip):
+
+        # def put_done(sdfs_filename, requester_ip):
+        #     logging.info('put_done {} {}'.format(sdfs_filename, requester_ip))
+        #     global TRANSFER_IN_PROGRESS
+        #     if sdfs_filename in TRANSFER_IN_PROGRESS:
+        #         TRANSFER_IN_PROGRESS[sdfs_filename] += 1
+
+        #     return True
+        # server.register_function(put_done, 'put_done')
+
+
+# ------------------------- sdfs client functions
+
+# ------------------------- sdfs slave functions
+
+        def put_file_data(sdfs_filename, file, ver, requester_ip):
             logging.info('put_file {} {}'.format(sdfs_filename, ver))
             # file = file
             file = file.data
             sdfs.put_file(sdfs_filename, file, ver)
 
             logging.info('Prep to return to requester {}'.format(requester_ip))
-            if requester_ip == getfqdn():
-                put_done(sdfs_filename, getfqdn())
-                return True
-
-            requester_handle = get_tcp_client_handle(requester_ip)
-            requester_handle.put_done(sdfs_filename, getfqdn())
-            return True
-
-        server.register_function(put_file, 'put_file')
-
-        def put_done(sdfs_filename, requester_ip):
-            logging.info('put_done {} {}'.format(sdfs_filename, requester_ip))
-            global TRANSFER_IN_PROGRESS
-            if sdfs_filename in TRANSFER_IN_PROGRESS:
-                TRANSFER_IN_PROGRESS[sdfs_filename] += 1
+            # if requester_ip == getfqdn():
+            #     put_done(sdfs_filename, getfqdn())
+            #     return True
 
             return True
-        server.register_function(put_done, 'put_done')
+
+        server.register_function(put_file_data, 'put_file_data')
+
+        def get_file_data(sdfs_filename, ver):
+            logging.info('get_file_data {} {}'.format(
+                sdfs_filename, 
+                ver,
+            ))
+
+            ver, file_data = sdfs.get_file(sdfs_filename, ver)
+
+            return {
+                'ver': ver,
+                'file_data': xmlrpc.client.Binary(file_data)
+            }
+
+        server.register_function(get_file_data, 'get_file_data')
+
+# ------------------------- sdfs slave functions
 
         # Run the server's main loop
         server.serve_forever()
-# ------------------------- distributed grep
+
 
 
 # ------------------------- message utils
@@ -218,7 +251,7 @@ def ask_for_join(joiner_ip):
     global member_list
     if joiner_ip in [m[0] for m in member_list]: return True
 
-    logging.info("Time[{}]: {} is joining.".format(time.time(), joiner_ip))
+    logging.debug("Time[{}]: {} is joining.".format(time.time(), joiner_ip))
     new_joiner = (joiner_ip, 0, time.time())
     member_list.append(new_joiner)
     member_list = sorted(member_list, key=itemgetter(0))
@@ -280,7 +313,7 @@ def merge_member_list(remote_member_list):
                 # only append it if it is not a machine recently detected to be offline
                 member_list.append(remote_member_list[i])
                 if domain_name not in tmpList:
-                    logging.info("Time[{}]: {} is joining.".format(time.time(), domain_name))
+                    logging.debug("Time[{}]: {} is joining.".format(time.time(), domain_name))
 
     member_list = sorted(member_list, key=itemgetter(0))
     update_neighbors()
@@ -367,7 +400,7 @@ def detect_failure():
             recent_removed.append(member)
             member_list.remove(member)
             false_positive_count += 1
-            logging.info("Time[{}]: {} has gone offline, current member_list: {}".format(time.time(), member[0], member_list))
+            logging.debug("Time[{}]: {} has gone offline, current member_list: {}".format(time.time(), member[0], member_list))
             logging.debug("recent_removed: {}".format(recent_removed))
             logging.debug("false_positive_count = {}".format(false_positive_count))
             logging.debug(member_list)
@@ -383,7 +416,9 @@ def cli():
     while True:
         command = input('Enter your command: ')
         if command == 'lsm':
-            logging.info("Time[{}]: {}".format(time.time(), member_list))
+            logging.info("Time[{}]: current number of members = {}".format(time.time(), len(member_list)))
+            for member in member_list:
+                logging.info("\t{}".format(member))
         elif command == 'lss':
             logging.info('Time[{}]: {}'.format(time.time(), getfqdn()))
         elif command == 'join':
@@ -394,8 +429,27 @@ def cli():
             args = command.split(' ')
             print(args)
             put(args[1], args[2])
+        elif command.startswith('get'):
+            args = command.split(' ')
+            print(args)
+            get(args[1], args[2])
         else:
             print("COMMAND NOT SUPPORTED")
+
+def work_done(sdfs_filename, data):
+    global TRANSFER_IN_PROGRESS
+    global lock 
+    lock.acquire()
+    if sdfs_filename in TRANSFER_IN_PROGRESS:
+        TRANSFER_IN_PROGRESS[sdfs_filename].append(data)
+    lock.release()
+
+def init_work(sdfs_filename):
+    global TRANSFER_IN_PROGRESS
+    global lock 
+    lock.acquire()
+    TRANSFER_IN_PROGRESS[sdfs_filename] = []
+    lock.release()
 
 # action: volunterally leave the system
 def leave():
@@ -435,22 +489,21 @@ def put_to_replica(target_ip, local_filename, sdfs_filename, ver):
     with open(local_filename, 'rb') as f:
         data = f.read()
         # print(type(data))
-        replica_handle.put_file(sdfs_filename, xmlrpc.client.Binary(data), ver, getfqdn())
+        replica_handle.put_file_data(sdfs_filename, xmlrpc.client.Binary(data), ver, getfqdn())
+    work_done(sdfs_filename, 1)
 
 def put(local_filename, sdfs_filename):
     print(local_filename, sdfs_filename)
     master_handle = get_tcp_client_handle(INTRODUCER)
 
-    put_info = master_handle.request_put(sdfs_filename, getfqdn())
+    put_info = master_handle.put_file_info(sdfs_filename, getfqdn())
     print(put_info)
 
     if not put_info:
         print('Put operation aborted.')
         return False
 
-    global TRANSFER_IN_PROGRESS
-    TRANSFER_IN_PROGRESS[sdfs_filename] = 0
-
+    init_work(sdfs_filename)
     ips = put_info['ips']
     ver = put_info['ver']
     for ip in ips:
@@ -459,17 +512,84 @@ def put(local_filename, sdfs_filename):
 
     while True:
         time.sleep(HEARTBEAT_PERIOD)
-        print('quorum count: ', TRANSFER_IN_PROGRESS[sdfs_filename])
-        if TRANSFER_IN_PROGRESS[sdfs_filename] >= 2:
+        
+        if len(TRANSFER_IN_PROGRESS[sdfs_filename]) >= 2:
+            print('quorum count: ', len(TRANSFER_IN_PROGRESS[sdfs_filename]))
             print('Put %s@%d Done.' % (sdfs_filename, ver))
+
+            global lock
+            lock.acquire()
             del TRANSFER_IN_PROGRESS[sdfs_filename]
+            lock.release()
+
             return True
+
+def get_from_replica(target_ip, sdfs_filename, ver):
+    replica_handle = get_tcp_client_handle(target_ip)
+
+    file_data = replica_handle.get_file_data(sdfs_filename, ver)
+    work_done(sdfs_filename, file_data)
+    return file_data
+
+def get(sdfs_filename, local_filename):
+    logging.info('contacting master for metadata {}'.format(sdfs_filename))
+
+    master_handle = get_tcp_client_handle(INTRODUCER)
+    replica_list = master_handle.get_file_info(sdfs_filename)
+
+    ips = replica_list[0]
+    ver = replica_list[1]
+
+
+    if len(replica_list) == 0:
+        logging.info('NO FILE NAMED {} FOUND.'.format(sdfs_filename))
+        return False
+
+    init_work(sdfs_filename)
+
+    for ip in ips:
+        p = Thread(target=get_from_replica, args=(ip, sdfs_filename, ver))
+        p.start()
+
+
+    while True:
+        time.sleep(HEARTBEAT_PERIOD)
+        if len(TRANSFER_IN_PROGRESS[sdfs_filename]) >= 2:
+            print('quorum count: ', len(TRANSFER_IN_PROGRESS[sdfs_filename]))
+            print('Get %s@%d Done.' % (sdfs_filename, ver))
+            # 
+            # return True
+            break
+
+    global lock
+    lock.acquire()
+    for file_meta in TRANSFER_IN_PROGRESS[sdfs_filename]:
+        local_ver = file_meta['ver']
+        file_data = file_meta['file_data']
+
+        if local_ver == ver:
+            with open(local_filename, 'wb') as f:
+                f.write(file_data.data)
+    del TRANSFER_IN_PROGRESS[sdfs_filename]
+    lock.release()
+
+    logging.info('write to local file {}'.format(local_filename))
+
+
+
+
+
+
+
+
+
+
 
 # -------------------------- command line interface
 
 
 if __name__=='__main__':
-    logging.basicConfig(filename='mp2.log',level=logging.INFO, filemode='w')
+    logging.basicConfig(filename='mp3.log',level=logging.INFO, filemode='w')
     #logging.basicConfig(filename='mp2.log',level=logging.DEBUG)
     
     #print to screen as well

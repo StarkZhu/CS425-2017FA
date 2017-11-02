@@ -1,6 +1,8 @@
 import time
 import random
 
+SDFS_PREFIX = 'sdfs/'
+
 class SDFS_Master():
     def __init__(self):
         # key - filename
@@ -51,12 +53,12 @@ class SDFS_Master():
             return -1
         return self.file_metadata[filename][1]
     
-    '''
-    def m_get_file_replica_list(self, filename):
+    
+    def get_file_replica_list(self, filename):
         if filename not in self.file_metadata:
             return []   # empty list
-        return self.file_metadata[0]
-    '''
+        return self.file_metadata[filename]
+    
 
     def file_updated_recently(self, filename):
         # print("inside file_updated_recently: ", filename)
@@ -90,14 +92,16 @@ class SDFS_Slave():
 
     def put_file(self, filename, file_data, version):
         self.update_file_version(filename, version)
-        f = open(filename, "wb")
+        f = open(SDFS_PREFIX + filename, "wb")
         f.write(file_data)
         f.close()
 
-    def get_file(self, filename):
-        f = open(filename, "rb")
+    def get_file(self, filename, version):
+        if (self.local_files[filename] != version):
+            return self.local_files[filename], None
+        f = open(SDFS_PREFIX + filename, "rb")
         file_data = f.read()
         f.close()
-        return file_data, self.local_files[filename]
+        return self.local_files[filename], file_data
 
   
