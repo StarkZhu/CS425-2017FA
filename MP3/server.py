@@ -14,6 +14,9 @@ import signal
 from sdfs import SDFS_Master, SDFS_Slave
 from timeout import Timeout
 from threading import Lock
+import os
+from multiprocessing import Process, Value, Array
+
 
 # Restrict to a particular path.
 class RequestHandler(SimpleXMLRPCRequestHandler):
@@ -29,13 +32,15 @@ false_positive_count = 0
 UDP_LOST_RATE = 0
 MACHINE_NUM = 3
 ALIVE = False
-HEARTBEAT_PERIOD = 1.0
-GRACE_PERIOD = 2.0
+HEARTBEAT_PERIOD = 0.7
+GRACE_PERIOD = 3.1
 REJOIN_COOLDOWN = 12.0
+MSG_Q = []
 
 sdfs = SDFS_Slave()
 sdfs_master = SDFS_Master()
 TRANSFER_IN_PROGRESS = {}
+SDFS_PREFIX = 'sdfs/'
 
 lock = Lock()
 
@@ -44,7 +49,8 @@ lock = Lock()
 def run_tcp_server():
     # Create server
     with SimpleXMLRPCServer(("0.0.0.0", 8000),
-                            requestHandler=RequestHandler) as server:
+                            requestHandler=RequestHandler,
+                            logRequests=False) as server:
         server.register_introspection_functions()
 
         def ping():
@@ -105,8 +111,13 @@ def run_tcp_server():
                 # ask for confirmation 
                 try:
                     with Timeout(30):
-                        requester_handle = get_tcp_client_handle(requester_ip)
-                        if not requester_handle.confirmation_handler():
+                        if requester_ip == getfqdn():
+                          command = input('This file was recently updated, are you sure you want to proceed? (yes/no) ')
+                          if command != 'yes':
+                            return False
+                        else:
+                          requester_handle = get_tcp_client_handle(requester_ip)
+                          if not requester_handle.confirmation_handler():
                             return False
 
                 except Timeout.Timeout:
@@ -161,7 +172,16 @@ def run_tcp_server():
 
         #     return True
         # server.register_function(put_done, 'put_done')
+        def remote_put_to_replica(target_ip, local_filename, sdfs_filename, ver):
+            logging.info('Got Remote Put Request {} {} {}'.format(
+                target_ip,
+                sdfs_filename,
+                ver
+            ))
+            put_to_replica(target_ip, local_filename, sdfs_filename, ver)
+            return True
 
+        server.register_function(remote_put_to_replica, 'remote_put_to_replica')
 
 # ------------------------- sdfs client functions
 
@@ -169,14 +189,10 @@ def run_tcp_server():
 
         def put_file_data(sdfs_filename, file, ver, requester_ip):
             logging.info('put_file {} {}'.format(sdfs_filename, ver))
-            # file = file
             file = file.data
             sdfs.put_file(sdfs_filename, file, ver)
 
             logging.info('Prep to return to requester {}'.format(requester_ip))
-            # if requester_ip == getfqdn():
-            #     put_done(sdfs_filename, getfqdn())
-            #     return True
 
             return True
 
@@ -188,10 +204,16 @@ def run_tcp_server():
                 ver,
             ))
 
-            ver, file_data = sdfs.get_file(sdfs_filename, ver)
+            local_ver, file_data = sdfs.get_file(sdfs_filename, ver)
+
+            if local_ver < ver:
+                # init repair 
+                p = Thread(target=get, args=(sdfs_filename, SDFS_PREFIX + SDFS_PREFIX))
+                p.start()
+
 
             return {
-                'ver': ver,
+                'ver': local_ver,
                 'file_data': xmlrpc.client.Binary(file_data)
             }
 
@@ -232,12 +254,15 @@ def decode_binary(msg):
 # udp listener thread
 def run_udp_server():
     global ALIVE
+    global MSG_Q
     serverSocket = socket(AF_INET, SOCK_DGRAM)
     serverSocket.bind(('0.0.0.0', 9000))
 
     while True:
-        rand = random.randint(0, 10)
-        message, address = serverSocket.recvfrom(65565)
+        # rand = random.randint(0, 10)
+        message, address = serverSocket.recvfrom(10240)#65565
+        MSG_Q.append(message)
+        '''
         remote_member_list = get_decoded_member_list(message)
         if remote_member_list[0][0] == 'join':
             ask_for_join(remote_member_list[0][1])
@@ -246,6 +271,7 @@ def run_udp_server():
             handle_leave_request(remote_member_list[0][1])
             continue
         if ALIVE: merge_member_list(remote_member_list)
+        '''
 
 def ask_for_join(joiner_ip):
     global member_list
@@ -330,6 +356,27 @@ def handle_leave_request(leaver_ip):
     member_list.pop(leaver_index)
     update_neighbors()
 
+def udp_worker():
+    global MSG_Q
+    global ALIVE
+
+    while True:
+        time.sleep(HEARTBEAT_PERIOD)
+        while len(MSG_Q) > 0:
+            message = MSG_Q.pop()
+            remote_member_list = get_decoded_member_list(message)
+            if remote_member_list[0][0] == 'join':
+                ask_for_join(remote_member_list[0][1])
+                continue
+            if remote_member_list[0][0] == 'leave':
+                handle_leave_request(remote_member_list[0][1])
+                continue
+            if ALIVE: merge_member_list(remote_member_list)
+
+        # # ask sdfs to check updated memberlist
+        global sdfs_master
+        sdfs_master.update_member_list(member_list)
+
 
 # ------------------------- membership list operation
 
@@ -381,9 +428,9 @@ def send_heartbeat():
             clientSocket.sendto(message, addr)
             has_sent[member_list[index][0]] = 1
 
-        # ask sdfs to check updated memberlist
-        global sdfs_master
-        sdfs_master.update_member_list(member_list)
+        # # ask sdfs to check updated memberlist
+        # global sdfs_master
+        # sdfs_master.update_member_list(member_list)
 
 
 # go through member_list to check if any machine is offline
@@ -394,8 +441,10 @@ def detect_failure():
     global sdfs
 
     cur_time = time.time()
+    need_update = False
     for member in member_list:
         if member[2] < cur_time - GRACE_PERIOD:
+            need_update = True
             # remove offline machine from member_list but remember its last alive stats
             recent_removed.append(member)
             member_list.remove(member)
@@ -406,6 +455,33 @@ def detect_failure():
             logging.debug(member_list)
     update_neighbors()
 
+    if need_update:
+      fail_recover()
+
+def fail_recover():
+    logging.info('Init Failure Repair')
+    global member_list
+    update_meta = sdfs_master.update_metadata(member_list)
+
+    if len(update_meta) == 0:
+        logging.info('But empty update_meta')
+        return
+
+    logging.info(update_meta)
+    for filename, meta in update_meta.items():
+        good_node, ver, new_nodes = meta
+        good_node_handle = get_tcp_client_handle(good_node)
+
+        for ip in new_nodes:
+            logging.info('Reparing {}@{}'.format(
+                filename,
+                ip,
+            ))
+            if good_node == getfqdn():
+                put_to_replica(ip, SDFS_PREFIX + filename, filename, ver)
+            else:
+                good_node_handle.remote_put_to_replica(ip, SDFS_PREFIX + filename, filename, ver)
+        
 # ------------------------- failure detection
 
 
@@ -414,26 +490,38 @@ def detect_failure():
 def cli():
     global member_list
     while True:
-        command = input('Enter your command: ')
-        if command == 'lsm':
-            logging.info("Time[{}]: current number of members = {}".format(time.time(), len(member_list)))
-            for member in member_list:
-                logging.info("\t{}".format(member))
-        elif command == 'lss':
-            logging.info('Time[{}]: {}'.format(time.time(), getfqdn()))
-        elif command == 'join':
-            init_join()
-        elif command == 'leave':
-            leave()
-        elif command.startswith('put'):
-            args = command.split(' ')
-            print(args)
-            put(args[1], args[2])
-        elif command.startswith('get'):
-            args = command.split(' ')
-            print(args)
-            get(args[1], args[2])
-        else:
+        try:
+            command = input('Enter your command: ')
+            if command == 'lsm':
+                logging.info("Time[{}]: current number of members = {}".format(time.time(), len(member_list)))
+                for member in member_list:
+                    logging.info("\t{}".format(member))
+            elif command == 'lss':
+                logging.info('Time[{}]: {}'.format(time.time(), getfqdn()))
+            elif command == 'join':
+                init_join()
+            elif command == 'leave':
+                leave()
+            elif command.startswith('put'):
+                args = command.split(' ')
+                print(args)
+                put(args[1], args[2])
+            elif command.startswith('get'):
+                args = command.split(' ')
+                print(args)
+                get(args[1], args[2])
+            elif command.startswith('ls'):
+                args = command.split(' ')
+                print(args)
+                if len(args) < 2:
+                  store()
+                else:
+                  ls(args[1])
+            elif command.startswith('store'):
+                store()
+            else:
+                print("COMMAND NOT SUPPORTED")
+        except:
             print("COMMAND NOT SUPPORTED")
 
 def work_done(sdfs_filename, data):
@@ -490,7 +578,13 @@ def put_to_replica(target_ip, local_filename, sdfs_filename, ver):
         data = f.read()
         # print(type(data))
         replica_handle.put_file_data(sdfs_filename, xmlrpc.client.Binary(data), ver, getfqdn())
-    work_done(sdfs_filename, 1)
+    
+    logging.info("put {} to {} done".format(
+        sdfs_filename,
+        target_ip,
+    ))
+    if not local_filename.startswith(SDFS_PREFIX):
+      work_done(sdfs_filename, 1)
 
 def put(local_filename, sdfs_filename):
     print(local_filename, sdfs_filename)
@@ -573,12 +667,37 @@ def get(sdfs_filename, local_filename):
     del TRANSFER_IN_PROGRESS[sdfs_filename]
     lock.release()
 
-    logging.info('write to local file {}'.format(local_filename))
+    if local_filename.startswith(SDFS_PREFIX):
+        sdfs.update_file_version(sdfs_filename, ver)
+        logging.info('repair file {} done'.format(sdfs_filename))
+    else:
+        logging.info('write to local file {}'.format(local_filename))
 
 
+def ls(sdfs_filename):
+    master_handle = get_tcp_client_handle(INTRODUCER)
+    replica_list = master_handle.get_file_info(sdfs_filename)
 
+    ips = replica_list[0]
+    ver = replica_list[1]
 
+    print('File: {} Ver:{}'.format(
+        sdfs_filename,
+        ver
+    ))
+    for i, ip in enumerate(ips):
+        print('Replica {}: {}'.format(
+            i,
+            ip,
+    ))
 
+def store():
+    files = sdfs.ls_file()
+    for k,v in files.items():
+        print('File: {} Ver: {}'.format(
+            k,
+            v
+        ))
 
 
 
@@ -590,7 +709,8 @@ def get(sdfs_filename, local_filename):
 
 if __name__=='__main__':
     logging.basicConfig(filename='mp3.log',level=logging.INFO, filemode='w')
-    #logging.basicConfig(filename='mp2.log',level=logging.DEBUG)
+
+    os.system("rm sdfs/*")
     
     #print to screen as well
     console = logging.StreamHandler()
@@ -601,6 +721,9 @@ if __name__=='__main__':
     # tcp_thread = Thread(target = run_tcp_server)
     udp_thread.start()
     # tcp_thread.start()
+
+    udp_worker_thread = Thread(target = udp_worker)
+    udp_worker_thread.start()
 
     hb_thread = Thread(target = send_heartbeat)
     hb_thread.start()
@@ -614,3 +737,4 @@ if __name__=='__main__':
     # tcp_thread.join()
     hb_thread.join()
     cli_thread.join()
+    udp_worker_thread.join()

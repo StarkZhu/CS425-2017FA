@@ -9,36 +9,45 @@ class SDFS_Master():
         # value - [[node1, node2, node3], version, timestamp]
         self.file_metadata = {}
         self.member_list = []
-
+    
     def update_member_list(self, member_list):
         self.member_list = member_list
-        self.check_all_replica()
 
-    def check_all_replica(self):
-        # TODO: implement this function
-        return False
+    def update_metadata(self, member_list):
+        to_replicate = {}
+        alive = set([item[0] for item in member_list])
+        for filename, value in self.file_metadata.items():
+            bad = []
+            good = []
+            for node in self.file_metadata[filename][0]:
+                if node not in alive:
+                    bad.append(node)
+                else:
+                    good.append(node)
+            if len(bad) > 0:
+                ver = self.file_metadata[filename][1]
+                self.file_metadata[filename][0] = list(good)
+                self.init_replica_nodes(filename)
+                set1 = set(self.file_metadata[filename][0])
+                set2 = set(good)
+                new_nodes = list(set(self.file_metadata[filename][0]) - set(good))
+                to_replicate[filename] = [good[0], ver, new_nodes]
+        return to_replicate
 
     def handle_put_request(self, filename):
-        # print("inside handle_put_request: ", filename)
         self.update_timestamp(filename)
         self.init_replica_nodes(filename)
         self.file_metadata[filename][1] += 1
         result = { 'ips': self.file_metadata[filename][0], 
                 'ver': self.file_metadata[filename][1] }
-        # print("before finish handle_put_request: ", result)
         return result
 
     def init_replica_nodes(self, filename):
-        # print("inside init_replica_nodes: ", filename)
         replicas = set(self.file_metadata[filename][0])
-        # print(replicas)
-        # print(self.member_list)
         while len(replicas) < 3:
             num = random.randint(0, len(self.member_list)-1)
-            # print("random int is: ", num)
             ip = self.member_list[num][0]
             if ip not in replicas:
-                # print("adding new replica to: ", ip)
                 replicas.add(ip)
                 self.file_metadata[filename][0].append(ip)
 
@@ -85,6 +94,7 @@ class SDFS_Master():
 
 class SDFS_Slave():
     def __init__(self):
+        # [filename, version]
         self.local_files = {}
 
     def update_file_version(self, filename, version):
@@ -104,4 +114,5 @@ class SDFS_Slave():
         f.close()
         return self.local_files[filename], file_data
 
-  
+    def ls_file(self):
+        return self.local_files
