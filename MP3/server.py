@@ -260,8 +260,8 @@ def run_udp_server():
 
     while True:
         # rand = random.randint(0, 10)
-        message, address = serverSocket.recvfrom(10240)#65565
-        print(time.time(), address)
+        message, address = serverSocket.recvfrom(4096)#65565
+        # print(time.time(), address)
         MSG_Q.append(message)
         '''
         remote_member_list = get_decoded_member_list(message)
@@ -450,7 +450,7 @@ def detect_failure():
             recent_removed.append(member)
             member_list.remove(member)
             false_positive_count += 1
-            logging.debug("Time[{}]: {} has gone offline, current member_list: {}".format(time.time(), member[0], member_list))
+            logging.info("Time[{}]: {} has gone offline".format(time.time(), member[0]))
             logging.debug("recent_removed: {}".format(recent_removed))
             logging.debug("false_positive_count = {}".format(false_positive_count))
             logging.debug(member_list)
@@ -493,8 +493,8 @@ def fail_recover():
 def cli():
     global member_list
     while True:
+        command = input('Enter your command: ')
         try:
-            command = input('Enter your command: ')
             if command == 'lsm':
                 logging.info("Time[{}]: current number of members = {}".format(time.time(), len(member_list)))
                 for member in member_list:
