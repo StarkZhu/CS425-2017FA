@@ -16,7 +16,7 @@ from timeout import Timeout
 from threading import Lock
 import os
 from multiprocessing import Process, Value, Array
-
+import ctypes
 
 # Restrict to a particular path.
 class RequestHandler(SimpleXMLRPCRequestHandler):
@@ -33,9 +33,12 @@ UDP_LOST_RATE = 0
 MACHINE_NUM = 3
 ALIVE = False
 HEARTBEAT_PERIOD = 0.7
-GRACE_PERIOD = 2.3
+GRACE_PERIOD = 3.1
 REJOIN_COOLDOWN = 12.0
-MSG_Q = []
+# MSG_Q = []
+MSG_Q = Value(ctypes.c_wchar_p, '')
+# MSG_POS_END = Value('i', 0)
+# MSG_POS_START = Value('i', 0)
 
 sdfs = SDFS_Slave()
 sdfs_master = SDFS_Master()
@@ -242,11 +245,14 @@ def get_decoded_member_list(s):
     text = base64.b64decode(s).decode("utf-8")
     return eval(text)
 
+def str2obj(s):
+    return eval(s)
+
 def encode_binary(msg):
     return base64.b64encode(msg)
 
 def decode_binary(msg):
-    return base64.b64decode(msg)
+    return base64.b64decode(msg).decode("utf-8")
 # ------------------------- message utils
 
 
@@ -261,8 +267,13 @@ def run_udp_server():
     while True:
         # rand = random.randint(0, 10)
         message, address = serverSocket.recvfrom(10240)#65565
+
         print(time.time(), address)
-        MSG_Q.append(message)
+        # MSG_Q.append(message)
+        # print('received', decode_binary(message), MSG_POS_END.value)
+        # print(decode_binary(message))
+        # MSG_Q.value += decode_binary(message)
+        # print('thread', MSG_Q.value)
         '''
         remote_member_list = get_decoded_member_list(message)
         if remote_member_list[0][0] == 'join':
@@ -360,12 +371,25 @@ def handle_leave_request(leaver_ip):
 def udp_worker():
     global MSG_Q
     global ALIVE
-
+    global MSG_POS_START, MSG_POS_END
     while True:
         time.sleep(HEARTBEAT_PERIOD)
-        while len(MSG_Q) > 0:
-            message = MSG_Q.pop()
-            remote_member_list = get_decoded_member_list(message)
+        # while len(MSG_Q) > 0:
+        #     message = MSG_Q.pop()
+        # print('thread', MSG_Q.value)
+        # MSG_Q.value = 'HelloWorld'
+        continue
+        for i in range(MSG_POS_START.value, MSG_POS_END.value):
+            break
+            # print('MSGQ', MSG_Q[1])
+            # break
+            # message = MSG_Q[i%MSG_BUFFER_SIZE]
+
+            # MSG_POS_START.value = i
+            # print(message)
+
+            remote_member_list = str2obj(message)
+            # remote_member_list = get_decoded_member_list(message)
             if remote_member_list[0][0] == 'join':
                 ask_for_join(remote_member_list[0][1])
                 continue
@@ -457,17 +481,15 @@ def detect_failure():
     update_neighbors()
 
     if need_update:
-      worker = Thread(target = fail_recover)
-      worker.run()
+      fail_recover()
 
 def fail_recover():
-    time.sleep(HEARTBEAT_PERIOD)
-    #logging.info('Init Failure Repair')
+    logging.info('Init Failure Repair')
     global member_list
     update_meta = sdfs_master.update_metadata(member_list)
 
     if len(update_meta) == 0:
-        #logging.info('But empty update_meta')
+        logging.info('But empty update_meta')
         return
 
     logging.info(update_meta)
@@ -720,7 +742,7 @@ if __name__=='__main__':
     console.setLevel(logging.DEBUG)
     logging.getLogger('').addHandler(console)
 
-    udp_thread = Thread(target = run_udp_server)
+    udp_thread = Process(target = run_udp_server)
     # tcp_thread = Thread(target = run_tcp_server)
     udp_thread.start()
     # tcp_thread.start()

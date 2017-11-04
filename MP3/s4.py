@@ -42,6 +42,7 @@ sdfs_master = SDFS_Master()
 TRANSFER_IN_PROGRESS = {}
 SDFS_PREFIX = 'sdfs/'
 
+UDP_COUNT = 0
 lock = Lock()
 
 # ------------------------- distributed grep
@@ -255,13 +256,14 @@ def decode_binary(msg):
 def run_udp_server():
     global ALIVE
     global MSG_Q
+    global UDP_COUNT
     serverSocket = socket(AF_INET, SOCK_DGRAM)
     serverSocket.bind(('0.0.0.0', 9000))
 
     while True:
         # rand = random.randint(0, 10)
         message, address = serverSocket.recvfrom(10240)#65565
-        print(time.time(), address)
+        
         MSG_Q.append(message)
         '''
         remote_member_list = get_decoded_member_list(message)
@@ -360,6 +362,7 @@ def handle_leave_request(leaver_ip):
 def udp_worker():
     global MSG_Q
     global ALIVE
+    global UDP_COUNT
 
     while True:
         time.sleep(HEARTBEAT_PERIOD)
@@ -372,7 +375,9 @@ def udp_worker():
             if remote_member_list[0][0] == 'leave':
                 handle_leave_request(remote_member_list[0][1])
                 continue
-            if ALIVE: merge_member_list(remote_member_list)
+            if ALIVE: 
+                merge_member_list(remote_member_list)
+                UDP_COUNT += 1
 
         # # ask sdfs to check updated memberlist
         global sdfs_master
@@ -413,6 +418,8 @@ def send_heartbeat():
 
     while True:
         time.sleep(HEARTBEAT_PERIOD)
+        print(UDP_COUNT)
+        
         # don't send heartbeat if volunterally leave the system or before whole system is initialized
         if not ALIVE or len(member_list) < MACHINE_NUM:
             continue
