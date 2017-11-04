@@ -2,6 +2,7 @@ from xmlrpc.server import SimpleXMLRPCServer
 from xmlrpc.server import SimpleXMLRPCRequestHandler
 from xml.sax.saxutils import escape
 from socket import *
+from sdfs import SDFS_Master
 
 import base64
 from timeout import Timeout
@@ -20,13 +21,13 @@ server = SimpleXMLRPCServer(
 server.register_introspection_functions()
 
 
-class TCPserver():
-    def __init__(self, slave, logger, sdfs, sdfs_master):
+class TCPServer():
+    def __init__(self, slave, sdfs_master, logger):
         self._slave = slave
         self._logger = logger
 
         self._sdfs_master = sdfs_master
-        self._sdfs = sdfs
+        # self._sdfs = sdfs
 
     def ping(self):
         self._logger.info("ping")
@@ -80,11 +81,11 @@ class TCPserver():
             # ask for confirmation 
             try:
                 with Timeout(30):
-                    if requester_ip == getfqdn():
-                      command = input('This file was recently updated, are you sure you want to proceed? (yes/no) ')
-                      if command != 'yes':
-                        return False
-                    else:
+                    # if requester_ip == getfqdn():
+                    #   command = input('This file was recently updated, are you sure you want to proceed? (yes/no) ')
+                    #   if command != 'yes':
+                    #     return False
+                    # else:
                       requester_handle = get_tcp_client_handle(requester_ip)
                       if not requester_handle.confirmation_handler():
                         return False
@@ -94,7 +95,7 @@ class TCPserver():
                 return False
         
         # get 3 target node and send to them the file
-        put_info = sdfs_master.handle_put_request(sdfsfilename)
+        put_info = self._sdfs_master.handle_put_request(sdfsfilename)
         # return ack to requester
         return put_info
 
@@ -114,12 +115,13 @@ class TCPserver():
     def confirmation_handler(self):
         try:
             with Timeout(30):
-                command = input('This file was recently updated, are you sure you want to proceed? (yes/no) ')
+                return True
+                # command = input('This file was recently updated, are you sure you want to proceed? (yes/no) ')
 
-                if command == 'yes':
-                    return True
-                else:
-                    return False
+                # if command == 'yes':
+                #     return True
+                # else:
+                #     return False
 
         except Timeout.Timeout:
             return False
@@ -133,18 +135,11 @@ class TCPserver():
         self._slave.put_to_replica(target_ip, local_filename, sdfs_filename, ver)
         return True
 
-
 # ------------------------- sdfs client functions
 
 # ------------------------- sdfs slave functions
-
     def put_file_data(self, sdfs_filename, file, ver, requester_ip):
-        self._logger.info('put_file {} {}'.format(sdfs_filename, ver))
-        file = file.data
-        self._sdfs.put_file(sdfs_filename, file, ver)
-
-        self._logger.info('Prep to return to requester {}'.format(requester_ip))
-
+        self._slave.put_file_data(sdfs_filename, file, ver, requester_ip)
         return True
 
     def get_file_data(self, sdfs_filename, ver):

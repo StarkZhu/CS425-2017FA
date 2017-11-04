@@ -10,10 +10,8 @@ from cli import CLI
 from threading import Thread
 
 def run_tcp_server(tcp_obj):
-    server.register_instance(TCPserver())
-    # Run the server's main loop
+    server.register_instance(tcp_obj)
     server.serve_forever()
-
 
 if __name__ == '__main__':
     logging.basicConfig(filename='mp3.log',level=logging.INFO, filemode='w')
@@ -22,8 +20,9 @@ if __name__ == '__main__':
     console.setLevel(logging.DEBUG)
     logging.getLogger('').addHandler(console)
 
-
-    slave = Slave(logging)
+    sdfs_master = SDFS_Master()
+    
+    slave = Slave(logging, sdfs_master)
     udpserver = UDPServer(slave)
 
     udpserver.run_server()
@@ -34,8 +33,10 @@ if __name__ == '__main__':
     
     slave.init_join()
 
-    #while True:
-    #    input('Hello')
+
+    tcpserver = TCPServer(slave, sdfs_master, logging)
+    run_tcp_server(tcpserver)
+
 
 
 

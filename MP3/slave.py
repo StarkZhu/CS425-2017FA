@@ -2,6 +2,8 @@ import time
 import threading
 import random
 from operator import itemgetter
+from threading import Lock
+from sdfs import SDFS_Slave
 
 from socket import *
 from global_vars import *
@@ -9,7 +11,7 @@ from utils import *
 
 class Slave():
     
-    def __init__(self, logger):
+    def __init__(self, logger, sdfs_master):
         #self._udp_server = None
         self._member_list = []
         self._neighbors = []
@@ -18,9 +20,12 @@ class Slave():
         self._alive = False
 
         self._my_socket = socket(AF_INET, SOCK_DGRAM)
-        self._sdfs = None
+        self._sdfs = SDFS_Slave()
+        self._sdfs_master = sdfs_master
         self._logger = logger
 
+        self._work_in_progress = {}
+        self._lock = Lock()
 
 
     def is_alive(self):
@@ -71,6 +76,7 @@ class Slave():
                 continue
             self.detect_failure()
             self.clean_removed_list()
+            self._sdfs_master.update_member_list(self._member_list)
 
     def clean_removed_list(self):
         '''
@@ -95,8 +101,8 @@ class Slave():
                 # remove offline machine from member_list but remember its last alive stats
                 self._recent_removed.append(member)
                 print('FAILURE DETECTED @ {}'.format(member))
-                #print("curent m_list: {}".format(self._member_list))
-                self._member_list.remove(member)
+                index = self.find_membership_idx(member[0])
+                self._member_list.pop(index)
         self.update_neighbors()
 
         # if need_update:
@@ -178,7 +184,6 @@ class Slave():
         self.update_neighbors()
 
     def find_membership_idx(self, ip):
-        # print(self._member_list)
         return [m[0] for m in self._member_list].index(ip)
 
     def leave(self):
@@ -191,6 +196,60 @@ class Slave():
                 continue
             self.send_udp_msg(member[0], [('leave', getfqdn())])
         self._member_list = reset_member_list
+
+    def put_file_data(self, sdfs_filename, input_file, ver, requester_ip):
+        self._logger.info('put_file {} {}'.format(sdfs_filename, ver))
+        file_data = input_file.data
+        self._sdfs.put_file(sdfs_filename, file_data, ver)
+        self._logger.debug('Prep to return to requester {}'.format(requester_ip))
+        return True
+
+    def init_work(self, sdfs_filename):
+        self._lock.acquire()
+        self._work_in_progress[sdfs_filename] = []
+        self._lock.release()
+
+    def put(self, local_filename, sdfs_filename):
+        master_handle = get_tcp_client_handle(INTRODUCER)
+        put_info = master_handle.put_file_info(sdfs_filename, getfqdn())
+        self._logger.info(put_info)
+
+        if not put_info:
+            print('Put operation aborted.')
+            return False
+
+        self.init_work(sdfs_filename)
+        ips = put_info['ips']
+        ver = put_info['ver']
+        for ip in ips:
+            p = threading.Thread(target=self.put_to_replica, args=(ip, local_filename, sdfs_filename, ver))
+            p.start()
+
+        while True:
+            time.sleep(HEARTBEAT_PERIOD)
+            if len(self._work_in_progress[sdfs_filename]) >= 2:
+                self._logger.info('quorum count: {}'.format(len(self._work_in_progress[sdfs_filename])))
+                self._logger.info('Put %s@%d Done.' % (sdfs_filename, ver))
+                self._lock.acquire()
+                del self._work_in_progress[sdfs_filename]
+                self._lock.release()
+                return True
+
+    def put_to_replica(self, target_ip, local_filename, sdfs_filename, ver):
+        replica_handle = get_tcp_client_handle(target_ip)
+        with open(local_filename, 'rb') as f:
+            data = f.read()
+            replica_handle.put_file_data(sdfs_filename, xmlrpc.client.Binary(data), ver, getfqdn())
+        self._logger.info("put {} to {} done".format(sdfs_filename, target_ip))
+
+        if not local_filename.startswith(SDFS_PREFIX):
+            self.work_done(sdfs_filename, 1)
+
+    def work_done(self, sdfs_filename, data):
+        self._lock.acquire()
+        if sdfs_filename in self._work_in_progress:
+            self._work_in_progress[sdfs_filename].append(data)
+        self._lock.release()
 
     def run(self):
         my_thread = threading.Thread(target=self.send_heartbeat)

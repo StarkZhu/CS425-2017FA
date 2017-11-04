@@ -15,41 +15,41 @@ class CLI():
     def run_cli(self):
         while True:
             command = input('Enter your command: ')
-            try:
+            # try:
                 # time.sleep(10)
-                if command == 'lsm':
-                    self._logger.info("Time[{}]: current number of members = {}".format(
-                        time.time(), 
-                        len(self._slave._member_list)
-                    ))
-                    for member in self._slave._member_list:
-                        self._logger.info("\t{}".format(member))
-                elif command == 'lss':
-                    self._logger.info('Time[{}]: {}'.format(
-                        time.time(), getfqdn())
-                    )
-                elif command == 'join':
-                    self._slave.init_join()
-                elif command == 'leave':
-                    self._slave.leave()
-                
-                elif command.startswith('put'):
-                    args = command.split(' ')
-                    print(args)
-                    self._slave.put(args[1], args[2])
-                elif command.startswith('get'):
-                    args = command.split(' ')
-                    print(args)
-                    self._slave.get(args[1], args[2])
-                elif command.startswith('ls'):
-                    args = command.split(' ')
-                    print(args)
-                    if len(args) < 2:
-                      self._slave.store()
-                    else:
-                      self._slave.ls(args[1])
-                elif command.startswith('store'):
-                    self._slave.store()
-            except:
-                print("COMMAND NOT SUPPORTED")
+            if command == 'lsm':
+                self._logger.info("Time[{}]: current number of members = {}".format(
+                    time.time(), 
+                    len(self._slave._member_list)
+                ))
+                for member in self._slave._member_list:
+                    self._logger.info("\t{}".format(member))
+            elif command == 'lss':
+                self._logger.info('Time[{}]: {}'.format(
+                    time.time(), getfqdn())
+                )
+            elif command == 'join':
+                self._slave.init_join()
+            elif command == 'leave':
+                self._slave.leave()
+            
+            elif command.startswith('put'):
+                args = command.split(' ')
+                print(args)
+                self._slave.put(args[1], args[2])
+            elif command.startswith('get'):
+                args = command.split(' ')
+                print(args)
+                self._slave.get(args[1], args[2])
+            elif command.startswith('ls'):
+                args = command.split(' ')
+                print(args)
+                if len(args) < 2:
+                  self._slave.store()
+                else:
+                  self._slave.ls(args[1])
+            elif command.startswith('store'):
+                self._slave.store()
+            #except:
+            #    print("COMMAND NOT SUPPORTED")
 

@@ -7,4 +7,4 @@ UDP_LOST_RATE = 0
 
 UDP_PORT_NUM = 9000
 INTRODUCER = 'fa17-cs425-g29-01.cs.illinois.edu'
-
+SDFS_PREFIX = 'sdfs/'
