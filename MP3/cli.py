@@ -32,7 +32,7 @@ class CLI():
                     self._slave.init_join()
                 elif command == 'leave':
                     self._slave.leave()
-                '''
+                
                 elif command.startswith('put'):
                     args = command.split(' ')
                     print(args)
@@ -50,9 +50,6 @@ class CLI():
                       self._slave.ls(args[1])
                 elif command.startswith('store'):
                     self._slave.store()
-                '''
-                # else:
-                #     print("COMMAND NOT SUPPORTED")
             except:
                 print("COMMAND NOT SUPPORTED")
 
