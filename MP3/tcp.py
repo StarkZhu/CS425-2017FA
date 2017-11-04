@@ -81,14 +81,14 @@ class TCPServer():
             # ask for confirmation 
             try:
                 with Timeout(30):
-                    # if requester_ip == getfqdn():
-                    #   command = input('This file was recently updated, are you sure you want to proceed? (yes/no) ')
-                    #   if command != 'yes':
-                    #     return False
-                    # else:
-                      requester_handle = get_tcp_client_handle(requester_ip)
-                      if not requester_handle.confirmation_handler():
-                        return False
+                    if requester_ip == getfqdn():
+                        command = input('This file was recently updated, are you sure you want to proceed? (yes/no) ')
+                        if command != 'yes':
+                            return False
+                    else:
+                        requester_handle = get_tcp_client_handle(requester_ip)
+                        if not requester_handle.confirmation_handler():
+                            return False
 
             except Timeout.Timeout:
                 # abadon operation
@@ -116,12 +116,12 @@ class TCPServer():
         try:
             with Timeout(30):
                 return True
-                # command = input('This file was recently updated, are you sure you want to proceed? (yes/no) ')
+                command = input('This file was recently updated, are you sure you want to proceed? (yes/no) ')
 
-                # if command == 'yes':
-                #     return True
-                # else:
-                #     return False
+                if command == 'yes':
+                    return True
+                else:
+                    return False
 
         except Timeout.Timeout:
             return False
