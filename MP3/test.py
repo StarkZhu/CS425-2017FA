@@ -39,6 +39,14 @@ def udp_server():
         UDP_COUNT += 1
         time.sleep(0.01)
 
+
+def user_input():
+    while True:
+        try:
+            command = input('Hello')
+        except:
+            pass
+
 if __name__=='__main__':
 
 
@@ -48,6 +56,9 @@ if __name__=='__main__':
 
     tcp_server_thread = Thread(target = tcp_server)
     tcp_server_thread.start()
+
+    cli_thread = Thread(target = user_input)
+    cli_thread.start()
 
     while True:
         time.sleep(1)

@@ -1,7 +1,8 @@
 import time
-import threading
+import math
 import random
 from operator import itemgetter
+from threading import Thread
 from threading import Lock
 from sdfs import SDFS_Slave
 
@@ -16,14 +17,16 @@ class Slave():
         self._member_list = []
         self._neighbors = []
         self._recent_removed = []
-
+        self._vote_num = 0
+        self._voting = False
+        self._voters = {}
         self._alive = False
 
         self._my_socket = socket(AF_INET, SOCK_DGRAM)
         self._sdfs = SDFS_Slave()
         self._sdfs_master = sdfs_master
         self._logger = logger
-
+        self._master = INTRODUCER
         self._work_in_progress = {}
         self._lock = Lock()
 
@@ -34,7 +37,7 @@ class Slave():
     def init_join(self):
         self._alive = True
         while len(self._member_list) < MACHINE_NUM or self._member_list[0][1] < 1:
-            self.send_udp_msg(INTRODUCER, [('join', getfqdn())])
+            self.send_udp_msg(self._master, [('join', getfqdn())])
             time.sleep(HEARTBEAT_PERIOD)
 
     def send_udp_msg(self, target, obj):
@@ -45,7 +48,6 @@ class Slave():
     def send_heartbeat(self):
         while True:
             time.sleep(HEARTBEAT_PERIOD)
-
             if not self.is_alive():
                 continue
 
@@ -56,7 +58,6 @@ class Slave():
 
                 if random.randint(0, 99) < UDP_LOST_RATE or ip in has_sent:
                     continue
-                
                 self.send_udp_msg(ip, self._member_list)
                 has_sent.add(ip)
 
@@ -77,6 +78,8 @@ class Slave():
             self.detect_failure()
             self.clean_removed_list()
             self._sdfs_master.update_member_list(self._member_list)
+            if self._master not in [x[0] for x in self._member_list]:
+                self.revote_master()
 
     def clean_removed_list(self):
         '''
@@ -100,15 +103,30 @@ class Slave():
                 need_update = True
                 # remove offline machine from member_list but remember its last alive stats
                 self._recent_removed.append(member)
-                print('FAILURE DETECTED @ {}'.format(member))
+                # print('FAILURE DETECTED @ {}'.format(member))
                 index = self.find_membership_idx(member[0])
                 self._member_list.pop(index)
         self.update_neighbors()
 
-        # if need_update:
-        #   worker = Thread(target = fail_recover)
-        #   worker.run()
+        if need_update:
+            worker = Thread(target = self.fail_recover)
+            worker.run()
 
+    def fail_recover(self):
+        time.sleep(HEARTBEAT_PERIOD)
+        update_meta = self._sdfs_master.update_metadata(self._member_list)
+        if len(update_meta) == 0: return
+
+        self._logger.info(update_meta)
+        for filename, meta in update_meta.items():
+            good_node, ver, new_nodes = meta
+            good_node_handle = get_tcp_client_handle(good_node)
+            for ip in new_nodes:
+                self._logger.info('Reparing {}@{}'.format(filename,ip))
+                if good_node == getfqdn():
+                    self.put_to_replica(ip, SDFS_PREFIX + filename, filename, ver)
+                else:
+                    good_node_handle.remote_put_to_replica(ip, SDFS_PREFIX + filename, filename, ver)
 
     def update_neighbors(self):
         idx = self.find_membership_idx(getfqdn())
@@ -210,26 +228,31 @@ class Slave():
         self._lock.release()
 
     def put(self, local_filename, sdfs_filename):
-        master_handle = get_tcp_client_handle(INTRODUCER)
+        start_time = time.time()
+        master_handle = get_tcp_client_handle(self._master)
         put_info = master_handle.put_file_info(sdfs_filename, getfqdn())
         self._logger.info(put_info)
 
         if not put_info:
-            print('Put operation aborted.')
+            self._logger.info('Put operation aborted.')
             return False
 
         self.init_work(sdfs_filename)
         ips = put_info['ips']
         ver = put_info['ver']
         for ip in ips:
-            p = threading.Thread(target=self.put_to_replica, args=(ip, local_filename, sdfs_filename, ver))
+            p = Thread(target=self.put_to_replica, args=(ip, local_filename, sdfs_filename, ver))
             p.start()
 
         while True:
             time.sleep(HEARTBEAT_PERIOD)
-            if len(self._work_in_progress[sdfs_filename]) >= 2:
-                self._logger.info('quorum count: {}'.format(len(self._work_in_progress[sdfs_filename])))
-                self._logger.info('Put %s@%d Done.' % (sdfs_filename, ver))
+            if len(self._work_in_progress[sdfs_filename]) >= self.calc_quorum(len(ips)):
+                self._logger.debug('quorum count: {}'.format(len(self._work_in_progress[sdfs_filename])))
+                self._logger.debug('Put %s@%d Done. [%fs]' % (
+                    sdfs_filename, 
+                    ver,
+                    time.time() - start_time
+                ))
                 self._lock.acquire()
                 del self._work_in_progress[sdfs_filename]
                 self._lock.release()
@@ -237,10 +260,13 @@ class Slave():
 
     def put_to_replica(self, target_ip, local_filename, sdfs_filename, ver):
         replica_handle = get_tcp_client_handle(target_ip)
-        with open(local_filename, 'rb') as f:
-            data = f.read()
-            replica_handle.put_file_data(sdfs_filename, xmlrpc.client.Binary(data), ver, getfqdn())
-        self._logger.info("put {} to {} done".format(sdfs_filename, target_ip))
+        try:
+            with open(local_filename, 'rb') as f:
+                data = f.read()
+                replica_handle.put_file_data(sdfs_filename, xmlrpc.client.Binary(data), ver, getfqdn())
+            self._logger.debug("put {} to {} done".format(sdfs_filename, target_ip))
+        except:
+            self._logger.info("local file {} doesn't exist".format(local_filename))
 
         if not local_filename.startswith(SDFS_PREFIX):
             self.work_done(sdfs_filename, 1)
@@ -251,8 +277,161 @@ class Slave():
             self._work_in_progress[sdfs_filename].append(data)
         self._lock.release()
 
+    def get_from_replica(self, target_ip, sdfs_filename, ver):
+        replica_handle = get_tcp_client_handle(target_ip)
+
+        file_data = replica_handle.get_file_data(sdfs_filename, ver)
+        self.work_done(sdfs_filename, file_data)
+        return file_data
+
+    def get_file_data(self, sdfs_filename, ver):
+        self._logger.info('get_file_data {} {}'.format(sdfs_filename, ver))
+        local_ver, file_data = self._sdfs.get_file(sdfs_filename, ver)
+        if local_ver < ver:
+            # init repair
+            p = Thread(target=self.get, args=(sdfs_filename, SDFS_PREFIX + sdfs_filename))
+            p.start()
+        return {'ver': local_ver,
+                'file_data': xmlrpc.client.Binary(file_data)}
+
+    def get(self, sdfs_filename, local_filename):
+        self._logger.info('contacting master for metadata {}'.format(sdfs_filename))
+        master_handle = get_tcp_client_handle(self._master)
+        replica_list = master_handle.get_file_info(sdfs_filename)
+
+        ips = replica_list[0]
+        ver = replica_list[1]
+        if len(replica_list) == 0:
+            self._logger.info('NO FILE NAMED {} FOUND.'.format(sdfs_filename))
+            return False
+        self.init_work(sdfs_filename)
+        for ip in ips:
+            p = Thread(target=self.get_from_replica, args=(ip, sdfs_filename, ver))
+            p.start()
+
+        while True:
+            time.sleep(HEARTBEAT_PERIOD)
+            if len(self._work_in_progress[sdfs_filename]) >= calc_quorum(len(ips)):
+                self._logger.debug('quorum count: {}'.format(len(self._work_in_progress[sdfs_filename])))
+                self._logger.info('Get %s@%d Done.' % (sdfs_filename, ver))
+                break
+        
+        self._lock.acquire()
+        for file_meta in self._work_in_progress[sdfs_filename]:
+            local_ver = file_meta['ver']
+            file_data = file_meta['file_data']
+            if local_ver == ver:
+                with open(local_filename, 'wb') as f:
+                    f.write(file_data.data)
+        del self._work_in_progress[sdfs_filename]
+        self._lock.release()
+
+        if local_filename.startswith(SDFS_PREFIX):
+            self._sdfs.update_file_version(sdfs_filename, ver)
+            self._logger.info('repair file {} done'.format(sdfs_filename))
+        else:
+            self._logger.info('write to local file {}'.format(local_filename))
+
+    def ls(self, sdfs_filename):
+        master_handle = get_tcp_client_handle(self._master)
+        replica_list = master_handle.get_file_info(sdfs_filename)
+
+        ips = replica_list[0]
+        ver = replica_list[1]
+        self._logger.info('File: {} Ver:{}'.format(sdfs_filename,ver))
+        for i, ip in enumerate(ips):
+            self._logger.info('Replica {}: {}'.format(i,ip,))
+
+    def store(self):
+        files = self._sdfs.ls_file()
+        for k,v in files.items():
+            self._logger.info('File: {} Ver: {}'.format(k,v))
+
+    def delete(self, sdfs_filename):
+        master_handle = get_tcp_client_handle(self._master)
+        old_nodes = master_handle.delete_file_info(sdfs_filename)
+        for node in old_nodes:
+            if node == getfqdn():
+                self._sdfs.delete_file_data(sdfs_filename)
+                continue
+            node_handle = get_tcp_client_handle(node)
+            node_handle.delete_file_data(sdfs_filename)
+        self._logger.info("deletion is done for {}".format(sdfs_filename))
+
+    def delete_file_data(self, sdfs_filename):
+        self._sdfs.delete_file_data(sdfs_filename)
+        self._logger.info("file is deleted: {}".format(sdfs_filename))
+
+    def revote_master(self):
+        if not self._voting:
+            self._vote_num = 0
+            self._voters = {}
+            self._voting = True
+        if getfqdn() == self._member_list[0][0]:
+            self._vote_num += 1
+            return
+        candidate_handle = get_tcp_client_handle(self._member_list[0][0])
+        candidate_handle.vote(getfqdn())
+
+    def calc_quorum(self, num):
+        return math.ceil((num+1)/2)
+
+    def receive_vote(self, voter):
+        #print("receive_vote is called")
+        if not self._voting:
+            self._voters = {}
+            self._vote_num = 0
+            self._voting = True
+        if voter not in self._voters:
+            self._voters[voter] = 1
+            self._vote_num += 1
+        #print("current vote num: {}".format(self._vote_num))
+        #print("{}".format(self._voters))
+        if self._master != getfqdn() and self._vote_num > len(self._member_list) / 2:
+            self._master = getfqdn()
+            self._logger.info("I am voted to be the new master")
+            p = Thread(target=self.rebuild_file_meta)
+            p.start()
+
+    def rebuild_file_meta(self):
+        #print("rebuilding")
+        time.sleep(HEARTBEAT_PERIOD*2)
+        tmp_file_meta = {}
+        for member in self._member_list:
+            member_files = {}
+            if member[0] == getfqdn():
+                member_files = self._sdfs.ls_file()
+            else:
+                member_handle = get_tcp_client_handle(member[0])
+                member_files = member_handle.assign_new_master(getfqdn())
+            #print("[{}] member_files: {}".format(member[0], member_files))
+            for filename, ver in member_files.items():
+                if filename not in tmp_file_meta:
+                    tmp_file_meta[filename] = []
+                tmp_file_meta[filename].append([member[0], ver])
+        #print("tmp_file_meta: {}".format(tmp_file_meta))
+        for filename, file_list in tmp_file_meta.items():
+            sorted(file_list, key=lambda x : x[1])
+            value = []
+            value.append([x[0] for x in file_list][0:min(len(file_list), 3)])
+            value.append(file_list[0][1])
+            value.append(time.time())
+            self._sdfs_master.put_file_metadata(filename, value)
+        self._logger.info("SDFS file metadata has been rebuilt")
+        self._voting = False
+        self._voters = {}
+        
+        p = Thread(target=self.fail_recover)
+        p.start()
+
+    def assign_new_master(self, new_master):
+        self._master = new_master
+        self._voting = False
+        self._logger.info("accepting new matser: {}".format(new_master))
+        return self._sdfs.ls_file()
+
     def run(self):
-        my_thread = threading.Thread(target=self.send_heartbeat)
-        maintenance_thread = threading.Thread(target=self.maintenance_func)
+        my_thread = Thread(target=self.send_heartbeat)
+        maintenance_thread = Thread(target=self.maintenance_func)
         my_thread.start()
         maintenance_thread.start()

@@ -2,6 +2,7 @@ from xmlrpc.server import SimpleXMLRPCServer
 from xmlrpc.server import SimpleXMLRPCRequestHandler
 from xml.sax.saxutils import escape
 from socket import *
+from utils import *
 from sdfs import SDFS_Master
 
 import base64
@@ -12,11 +13,12 @@ from timeout import Timeout
 class RequestHandler(SimpleXMLRPCRequestHandler):
     rpc_paths = ('/RPC2',)
 
-
+# Create Server Object
 server = SimpleXMLRPCServer(
             ("0.0.0.0", 8000),
             requestHandler=RequestHandler,
-            logRequests=False
+            logRequests=False,
+            allow_none=True
 )
 server.register_introspection_functions()
 
@@ -107,15 +109,17 @@ class TCPServer():
     def delete_file_info(self, sdfsfilename):
         # look up who has file 
         # send request to delete the file
-        return False
+        return self._sdfs_master.delete_file_info(sdfsfilename)
 
 # ------------------------- sdfs master functions
 
 # ------------------------- sdfs client functions
     def confirmation_handler(self):
+        '''
+        ask confirmation from client
+        '''
         try:
             with Timeout(30):
-                return True
                 command = input('This file was recently updated, are you sure you want to proceed? (yes/no) ')
 
                 if command == 'yes':
@@ -127,6 +131,9 @@ class TCPServer():
             return False
     
     def remote_put_to_replica(self, target_ip, local_filename, sdfs_filename, ver):
+        '''
+        send file to replica
+        '''
         self._logger.info('Got Remote Put Request {} {} {}'.format(
             target_ip,
             sdfs_filename,
@@ -139,29 +146,38 @@ class TCPServer():
 
 # ------------------------- sdfs slave functions
     def put_file_data(self, sdfs_filename, file, ver, requester_ip):
+        '''
+        save file to sdfs
+        '''
         self._slave.put_file_data(sdfs_filename, file, ver, requester_ip)
         return True
 
     def get_file_data(self, sdfs_filename, ver):
-        self._logger.info('get_file_data {} {}'.format(
-            sdfs_filename, 
-            ver,
-        ))
+        '''
+        read data from sdfs
+        '''
+        return self._slave.get_file_data(sdfs_filename, ver)
 
-        local_ver, file_data = self._sdfs.get_file(sdfs_filename, ver)
+    def delete_file_data(self, sdfs_filename):
+        '''
+        delete sdfs file
+        '''
+        self._slave.delete_file_data(sdfs_filename)
+        return True
 
-        if local_ver < ver:
-            # init repair 
-            p = Thread(target=self._slave.get, args=(sdfs_filename, SDFS_PREFIX + SDFS_PREFIX))
-            p.start()
+    def vote(self, ip):
+        # look up who has file 
+        # send request to delete the file
+        return self._slave.receive_vote(ip)
 
-
-        return {
-            'ver': local_ver,
-            'file_data': xmlrpc.client.Binary(file_data)
-        }
-
-
+    def assign_new_master(self, ip):
+        '''
+        assgin new master and return a list of file holding
+        '''
+        msg = self._slave.assign_new_master(ip)
+        # print(msg)
+        return msg
+        
 # ------------------------- sdfs slave functions
 
 

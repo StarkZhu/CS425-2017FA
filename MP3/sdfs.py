@@ -1,5 +1,7 @@
 import time
 import random
+import os
+from utils import *
 
 SDFS_PREFIX = 'sdfs/'
 
@@ -13,6 +15,9 @@ class SDFS_Master():
     def update_member_list(self, member_list):
         self.member_list = member_list
 
+    def put_file_metadata(self, filename, value):
+        self.file_metadata[filename] = value
+
     def update_metadata(self, member_list):
         to_replicate = {}
         alive = set([item[0] for item in member_list])
@@ -24,7 +29,7 @@ class SDFS_Master():
                     bad.append(node)
                 else:
                     good.append(node)
-            if len(bad) > 0:
+            if len(good) < 3:
                 ver = self.file_metadata[filename][1]
                 self.file_metadata[filename][0] = list(good)
                 self.init_replica_nodes(filename)
@@ -52,7 +57,6 @@ class SDFS_Master():
                 self.file_metadata[filename][0].append(ip)
 
     def get_file_timestamp(self, filename):
-        # print("inside get_file_timestamp: ", filename)
         if filename not in self.file_metadata:
             return -1
         return self.file_metadata[filename][2]
@@ -70,26 +74,24 @@ class SDFS_Master():
     
 
     def file_updated_recently(self, filename):
-        # print("inside file_updated_recently: ", filename)
         if filename not in self.file_metadata:
-            # print("about to return False")
             return False
         cur_time = time.time()
         last_update = self.get_file_timestamp(filename)
         return cur_time - last_update < 60
 
     def update_timestamp(self, filename):
-        # print("inside update_timestamp: ", filename)
         if filename not in self.file_metadata:
-            # print("creating value for ", filename)
             self.file_metadata[filename] = []
             self.file_metadata[filename].append([])
             self.file_metadata[filename].append(0)
             self.file_metadata[filename].append(0)
         self.file_metadata[filename][2] = time.time()
-        # print(self.file_metadata[filename])
 
-
+    def delete_file_info(self, sdfs_filename):
+        old_nodes = self.file_metadata[sdfs_filename][0]
+        del self.file_metadata[sdfs_filename]
+        return old_nodes
 
 
 class SDFS_Slave():
@@ -116,3 +118,7 @@ class SDFS_Slave():
 
     def ls_file(self):
         return self.local_files
+
+    def delete_file_data(self, sdfs_filename):
+        del self.local_files[sdfs_filename]
+        os.remove(SDFS_PREFIX + sdfs_filename)
