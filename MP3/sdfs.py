@@ -108,6 +108,9 @@ class SDFS_Slave():
         f.write(file_data)
         f.close()
 
+    def get_file_version(self, filename):
+        return self.local_files[filename]
+
     def get_file(self, filename, version):
         if (self.local_files[filename] != version):
             return self.local_files[filename], None

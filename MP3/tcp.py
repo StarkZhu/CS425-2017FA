@@ -181,6 +181,13 @@ class TCPServer():
         msg = self._slave.assign_new_master(ip)
         # print(msg)
         return msg
+
+    def update_file_version(self, filename, ver):
+        # look up who has file 
+        # send request to delete the file
+        self._slave.update_file_version(filename, ver)
+        return True
+
         
 # ------------------------- sdfs slave functions
 
