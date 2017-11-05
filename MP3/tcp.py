@@ -7,7 +7,7 @@ from sdfs import SDFS_Master
 
 import base64
 from timeout import Timeout
-
+import time
 
 # Restrict to a particular path.
 class RequestHandler(SimpleXMLRPCRequestHandler):
@@ -79,7 +79,11 @@ class TCPServer():
 
     def put_file_info(self, sdfsfilename, requester_ip):
         # check when last time updated this file
+        start_time = time.time()
         if self._sdfs_master.file_updated_recently(sdfsfilename):
+            self._logger.info('Write conflict detected: {}s'.format(
+                time.time() - start_time,
+            ))
             # ask for confirmation 
             try:
                 with Timeout(30):

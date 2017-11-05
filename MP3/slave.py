@@ -103,7 +103,7 @@ class Slave():
                 need_update = True
                 # remove offline machine from member_list but remember its last alive stats
                 self._recent_removed.append(member)
-                # print('FAILURE DETECTED @ {}'.format(member))
+                print('FAILURE DETECTED @ {}'.format(member))
                 index = self.find_membership_idx(member[0])
                 self._member_list.pop(index)
         self.update_neighbors()
@@ -114,6 +114,7 @@ class Slave():
 
     def fail_recover(self):
         time.sleep(HEARTBEAT_PERIOD)
+        start_time = time.time()
         update_meta = self._sdfs_master.update_metadata(self._member_list)
         if len(update_meta) == 0: return
 
@@ -127,6 +128,7 @@ class Slave():
                     self.put_to_replica(ip, SDFS_PREFIX + filename, filename, ver)
                 else:
                     good_node_handle.remote_put_to_replica(ip, SDFS_PREFIX + filename, filename, ver)
+        self._logger.info("Repair done [{}s]".format(time.time() - start_time))
 
     def update_neighbors(self):
         idx = self.find_membership_idx(getfqdn())
@@ -248,7 +250,7 @@ class Slave():
             time.sleep(HEARTBEAT_PERIOD)
             if len(self._work_in_progress[sdfs_filename]) >= self.calc_quorum(len(ips)):
                 self._logger.debug('quorum count: {}'.format(len(self._work_in_progress[sdfs_filename])))
-                self._logger.debug('Put %s@%d Done. [%fs]' % (
+                self._logger.info('Put %s@%d Done. [%fs]' % (
                     sdfs_filename, 
                     ver,
                     time.time() - start_time
@@ -262,8 +264,8 @@ class Slave():
         replica_handle = get_tcp_client_handle(target_ip)
         try:
             with open(local_filename, 'rb') as f:
-                data = f.read()
-                replica_handle.put_file_data(sdfs_filename, xmlrpc.client.Binary(data), ver, getfqdn())
+                #data = f.read()
+                replica_handle.put_file_data(sdfs_filename, xmlrpc.client.Binary(f.read()), ver, getfqdn())
             self._logger.debug("put {} to {} done".format(sdfs_filename, target_ip))
         except:
             self._logger.info("local file {} doesn't exist".format(local_filename))
@@ -295,6 +297,7 @@ class Slave():
                 'file_data': xmlrpc.client.Binary(file_data)}
 
     def get(self, sdfs_filename, local_filename):
+        start_time = time.time()
         self._logger.info('contacting master for metadata {}'.format(sdfs_filename))
         master_handle = get_tcp_client_handle(self._master)
         replica_list = master_handle.get_file_info(sdfs_filename)
@@ -311,7 +314,7 @@ class Slave():
 
         while True:
             time.sleep(HEARTBEAT_PERIOD)
-            if len(self._work_in_progress[sdfs_filename]) >= calc_quorum(len(ips)):
+            if len(self._work_in_progress[sdfs_filename]) >= self.calc_quorum(len(ips)):
                 self._logger.debug('quorum count: {}'.format(len(self._work_in_progress[sdfs_filename])))
                 self._logger.info('Get %s@%d Done.' % (sdfs_filename, ver))
                 break
@@ -328,9 +331,10 @@ class Slave():
 
         if local_filename.startswith(SDFS_PREFIX):
             self._sdfs.update_file_version(sdfs_filename, ver)
-            self._logger.info('repair file {} done'.format(sdfs_filename))
+            self._logger.debug('repair file {} done'.format(sdfs_filename))
         else:
             self._logger.info('write to local file {}'.format(local_filename))
+            self._logger.info("Get done [{}s]".format(time.time() - start_time))
 
     def ls(self, sdfs_filename):
         master_handle = get_tcp_client_handle(self._master)
