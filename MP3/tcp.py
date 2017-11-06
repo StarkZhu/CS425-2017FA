@@ -8,6 +8,7 @@ from sdfs import SDFS_Master
 import base64
 from timeout import Timeout
 import time
+import subprocess
 
 # Restrict to a particular path.
 class RequestHandler(SimpleXMLRPCRequestHandler):
@@ -46,6 +47,8 @@ class TCPServer():
             encoding='utf-8', 
             errors='replace',
         ).stdout
+
+        self._logger.debug(text)
 
         return base64.b64encode(text.encode('utf-8'))
 
