@@ -1,9 +1,9 @@
-This is the implementation of MP2. 
+This is the implementation of MP3. 
 
 ===START THE NODE===
 
-Assuming running in MP2/ folder
-`python3.6 server.py`
+Assuming running in MP3/ folder
+`python3.6 main.py`
 
 
 
@@ -14,7 +14,14 @@ Assuming running in MP2/ folder
 * lsm list members
 * lss list self's address 
 
+* put localfilename sdfsfilename
+* get sdfsfilename localfilename
+* delete sdfsfilename
+* ls sdfsfilename
+* store
 
+===SETUP===
+You may need to run ../setup.sh once to setup. 
 
 ===LOGS===
 

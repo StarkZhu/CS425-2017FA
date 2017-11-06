@@ -9,6 +9,9 @@ import logging
 
 
 class UDPServer():
+    '''
+    UDP Server that handles heartbeating
+    '''
     def __init__(self, slave):
         self._udp_socket = socket(AF_INET, SOCK_DGRAM)
         self._udp_socket.bind(('0.0.0.0', 9000))
@@ -19,12 +22,18 @@ class UDPServer():
 
 
     def server_thread(self):
+        '''
+        UDP server thread that wait for packet
+        '''
         while True:
             message, address = self._udp_socket.recvfrom(4096)#65565
             self._worker_queue.append(message)
             self._udp_count += 1
 
     def worker_thread(self):
+        '''
+        UDP worker thread to handle the work in the queue
+        '''
         while True:
             time.sleep(HEARTBEAT_PERIOD)
             #print(self._udp_count)
@@ -45,6 +54,9 @@ class UDPServer():
             
 
     def run_server(self):
+        '''
+        init the server
+        '''
         udp_thread = Thread(target = self.server_thread)
         worker_thread = Thread(target = self.worker_thread)
         udp_thread.start()

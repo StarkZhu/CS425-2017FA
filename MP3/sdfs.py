@@ -6,6 +6,10 @@ from utils import *
 SDFS_PREFIX = 'sdfs/'
 
 class SDFS_Master():
+    '''
+    master node keeps meta info about all files in SDFS:
+    where 3 replica are saved, latest version, last update time (local clock)
+    '''
     def __init__(self):
         # key - filename
         # value - [[node1, node2, node3], version, timestamp]
@@ -95,6 +99,9 @@ class SDFS_Master():
 
 
 class SDFS_Slave():
+    '''
+    slave node in SDFS, only keeps info about files in current node/machine
+    '''
     def __init__(self):
         # [filename, version]
         self.local_files = {}

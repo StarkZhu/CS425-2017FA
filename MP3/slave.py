@@ -79,6 +79,10 @@ class Slave():
         )
 
     def maintenance_func(self):
+        '''
+        run in a thread, in charge of all maintenance work, including:
+        failure detection, clean removed nodes list, update member list, revote leader
+        '''
         while True:
             time.sleep(HEARTBEAT_PERIOD)
             if not self.is_alive():
@@ -100,6 +104,9 @@ class Slave():
 
     
     def detect_failure(self):
+        '''
+        check member's timestampe to detect failed nodes, enable file replication if needed
+        '''
         # go through member_list to check if any machine is offline
         cur_time = time.time()
         need_update = False
@@ -111,7 +118,7 @@ class Slave():
                 need_update = True
                 # remove offline machine from member_list but remember its last alive stats
                 self._recent_removed.append(member)
-                print('FAILURE DETECTED @ {}'.format(member))
+                #print('FAILURE DETECTED @ {}'.format(member))
                 index = self.find_membership_idx(member[0])
                 self._member_list.pop(index)
 
@@ -122,6 +129,9 @@ class Slave():
             worker.run()
 
     def fail_recover(self):
+        '''
+        check all existing files, if alive replica is less than 3, ask a good node to PUT the file to a new node, aka replicate the file, until 3 replica is reached
+        '''
         time.sleep(HEARTBEAT_PERIOD)
         start_time = time.time()
         update_meta = self._sdfs_master.update_metadata(self._member_list)
@@ -155,8 +165,9 @@ class Slave():
         self._logger.debug(self._neighbors)
 
     def merge_member_list(self, remote_member_list):
-        # when receive heartbeat messages, merge the received member_list and local one, update information regarding offline machines and/or new join machines
-
+        '''
+        when receive heartbeat messages, merge the received member_list and local one, update information regarding offline machines and/or new join machines
+        '''
         if not self._alive: return 
 
         j = 0
@@ -188,6 +199,10 @@ class Slave():
 
 
     def handle_join_request(self, joiner_ip):
+        '''
+        used by introducer/leader only
+        handle all join request, enable entire system when enough machine has joined
+        '''
         if joiner_ip in [m[0] for m in self._member_list]: return
 
         self._logger.info("Time[{}]: {} is joining.".format(time.time(), joiner_ip))
@@ -208,6 +223,9 @@ class Slave():
                 self.send_udp_msg(member[0], self._member_list)
 
     def handle_leave_request(self, leaver_ip):
+        '''
+        used by introducer/leader
+        '''
         self._logger.info("Time[{}]: {} volunterally left".format(time.time(), leaver_ip))
         
         leaver_index = self.find_membership_idx(leaver_ip)
@@ -237,12 +255,19 @@ class Slave():
     #     return True
 
     def init_work(self, sdfs_filename):
+        '''
+        used to count quorum
+        '''
         self._lock.acquire()
         self._work_in_progress[sdfs_filename] = []
         self._lock.release()
 
     def put(self, local_filename, sdfs_filename):
+        '''
+        put a file into SDFS
+        '''
         start_time = time.time()
+        # contact master to register meta info, receive 3 slave names to transfer file data
         master_handle = get_tcp_client_handle(self._master)
         put_info = master_handle.put_file_info(sdfs_filename, getfqdn())
         self._logger.info(put_info)
@@ -254,10 +279,12 @@ class Slave():
         self.init_work(sdfs_filename)
         ips = put_info['ips']
         ver = put_info['ver']
+        # client transfer file data through network to 3 destination nodes
         for ip in ips:
             p = Thread(target=self.put_to_replica, args=(ip, local_filename, sdfs_filename, ver))
             p.start()
 
+        # return to user immediately when quorum is satisfied
         while True:
             time.sleep(HEARTBEAT_PERIOD)
             if len(self._work_in_progress[sdfs_filename]) >= self.calc_quorum(len(ips)):
@@ -273,6 +300,10 @@ class Slave():
                 return True
 
     def put_to_replica(self, target_ip, local_filename, sdfs_filename, ver):
+        '''
+        transfer file data to a destination node
+        may also be used to repair files in failure detection
+        '''
         replica_handle = get_tcp_client_handle(target_ip)
         try:
             
@@ -308,10 +339,8 @@ class Slave():
         file_data = replica_handle.get_file_data(sdfs_filename, ver)
         self.work_done(sdfs_filename, file_data)
         return file_data
-
     
     def get_file_data(self, sdfs_filename, ver):
-        #self._logger.info('get_file_data {} {}'.format(sdfs_filename, ver))
         local_ver = self._sdfs.get_file_version(sdfs_filename)
         if local_ver < ver:
             # init repair
@@ -322,6 +351,7 @@ class Slave():
     
     def get(self, sdfs_filename, local_filename):
         start_time = time.time()
+        # contact master for meta info, know who has whose replica
         self._logger.info('contacting master for metadata {}'.format(sdfs_filename))
         master_handle = get_tcp_client_handle(self._master)
         replica_list = master_handle.get_file_info(sdfs_filename)
@@ -332,6 +362,8 @@ class Slave():
             self._logger.info('NO FILE NAMED {} FOUND.'.format(sdfs_filename))
             return False
         self.init_work(sdfs_filename)
+
+        # get files from all nodes that have the replica, ask for correct/latest version
         for ip in ips:
             p = Thread(target=self.get_from_replica, args=(ip, sdfs_filename, ver))
             p.start()
@@ -341,7 +373,7 @@ class Slave():
             if len(self._work_in_progress[sdfs_filename]) >= self.calc_quorum(len(ips)):
                 self._logger.debug('quorum count: {}'.format(len(self._work_in_progress[sdfs_filename])))
                 break
-        
+        # but return to user immediate when just 1 file transfer is completed
         self._lock.acquire()
         for file_meta in self._work_in_progress[sdfs_filename]:
             local_ver = file_meta['ver']
@@ -382,6 +414,9 @@ class Slave():
             self._logger.info('File: {} Ver: {}'.format(k,v))
 
     def delete(self, sdfs_filename):
+        '''
+        get meta info from master, then contact 3 replica nodes and ask them to delete
+        '''
         master_handle = get_tcp_client_handle(self._master)
         old_nodes = master_handle.delete_file_info(sdfs_filename)
         for node in old_nodes:
@@ -397,6 +432,10 @@ class Slave():
         self._logger.info("file is deleted: {}".format(sdfs_filename))
 
     def revote_master(self):
+        '''
+        vote for the machine with lowest number
+        '''
+
         if not self._voting:
             self._vote_num = 0
             self._voters = {}
@@ -411,6 +450,9 @@ class Slave():
         return math.ceil((num+1)/2)
 
     def receive_vote(self, voter):
+        '''
+        potential lead receive votes and count till quorum, then declare as new leader and notify all other machines
+        '''
         #print("receive_vote is called")
         if not self._voting:
             self._voters = {}
@@ -428,6 +470,10 @@ class Slave():
             p.start()
 
     def rebuild_file_meta(self):
+        '''
+        ask for file meta info from all machines
+        collect file info and build the metadata table, to be able to answer all file queries
+        '''
         #print("rebuilding")
         time.sleep(HEARTBEAT_PERIOD*2)
         tmp_file_meta = {}
