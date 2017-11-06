@@ -61,6 +61,8 @@ class Slave():
 
             self._hb_lock.acquire()
             for index in self._neighbors:
+                if index >= len(self._member_list):
+                    continue
                 ip = self._member_list[index][0]
 
                 if random.randint(0, 99) < UDP_LOST_RATE or ip in has_sent:
@@ -123,7 +125,7 @@ class Slave():
                 self._member_list.pop(index)
 
         self.update_neighbors()
-
+        self._sdfs_master.update_member_list(self._member_list)
         if need_update:
             worker = Thread(target = self.fail_recover)
             worker.run()
@@ -132,14 +134,18 @@ class Slave():
         '''
         check all existing files, if alive replica is less than 3, ask a good node to PUT the file to a new node, aka replicate the file, until 3 replica is reached
         '''
-        time.sleep(HEARTBEAT_PERIOD)
+        time.sleep(HEARTBEAT_PERIOD*8)
+        self._sdfs_master.update_member_list(self._member_list)
         start_time = time.time()
+
         update_meta = self._sdfs_master.update_metadata(self._member_list)
         if len(update_meta) == 0: return
 
         #self._logger.info(update_meta)
         for filename, meta in update_meta.items():
             good_node, ver, new_nodes = meta
+            # self._logger.info('Contacting %s' % good_node)
+
             good_node_handle = get_tcp_client_handle(good_node)
             for ip in new_nodes:
                 self._logger.info('Reparing {}@{}'.format(filename,ip))
@@ -401,6 +407,10 @@ class Slave():
     def ls(self, sdfs_filename):
         master_handle = get_tcp_client_handle(self._master)
         replica_list = master_handle.get_file_info(sdfs_filename)
+
+        if len(replica_list) == 0:
+            self._logger.info('No Such File.')
+            return 
 
         ips = replica_list[0]
         ver = replica_list[1]
