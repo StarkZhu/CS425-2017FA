@@ -93,6 +93,8 @@ class SDFS_Master():
         self.file_metadata[filename][2] = time.time()
 
     def delete_file_info(self, sdfs_filename):
+        if sdfs_filename not in self.file_metadata:
+            return []
         old_nodes = self.file_metadata[sdfs_filename][0]
         del self.file_metadata[sdfs_filename]
         return old_nodes

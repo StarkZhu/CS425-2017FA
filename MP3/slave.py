@@ -137,7 +137,7 @@ class Slave():
         update_meta = self._sdfs_master.update_metadata(self._member_list)
         if len(update_meta) == 0: return
 
-        self._logger.info(update_meta)
+        #self._logger.info(update_meta)
         for filename, meta in update_meta.items():
             good_node, ver, new_nodes = meta
             good_node_handle = get_tcp_client_handle(good_node)
@@ -270,7 +270,7 @@ class Slave():
         # contact master to register meta info, receive 3 slave names to transfer file data
         master_handle = get_tcp_client_handle(self._master)
         put_info = master_handle.put_file_info(sdfs_filename, getfqdn())
-        self._logger.info(put_info)
+        #self._logger.info(put_info)
 
         if not put_info:
             self._logger.info('Put operation aborted.')
@@ -356,11 +356,11 @@ class Slave():
         master_handle = get_tcp_client_handle(self._master)
         replica_list = master_handle.get_file_info(sdfs_filename)
 
-        ips = replica_list[0]
-        ver = replica_list[1]
         if len(replica_list) == 0:
             self._logger.info('NO FILE NAMED {} FOUND.'.format(sdfs_filename))
             return False
+        ips = replica_list[0]
+        ver = replica_list[1]
         self.init_work(sdfs_filename)
 
         # get files from all nodes that have the replica, ask for correct/latest version
