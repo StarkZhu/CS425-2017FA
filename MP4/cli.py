@@ -56,13 +56,14 @@ class CLI():
                 elif command.startswith('delete'):
                     args = command.split(' ')
                     self._slave.delete(args[1])
-                elif command.startswith('sssp'):
+                elif command.startswith('sava'):
                     args = command.split(' ')
-                    # args[2] - source
-                    # args[1] - graph_file
-                    self._slave.put(args[1], SAVA_GRAPH_FILE)
-                    self._slave.submit_job(args[2])
+                    # example: save graph_file task params 
+                    # example: save graph_file sssp source 
+                    # example: save graph_file pgrk max_iter 
 
+                    self._slave.put(args[1], SAVA_GRAPH_FILE)
+                    self._slave.submit_job(args[2:])
 
             except:
                print("COMMAND NOT SUPPORTED")

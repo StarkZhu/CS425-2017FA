@@ -524,9 +524,10 @@ class Slave():
     def update_file_version(self, filename, ver):
         self._sdfs.update_file_version(filename, ver)
 
-    def submit_job(self, source_node):
+    def submit_job(self, args):
         master_handle = get_tcp_client_handle(self._master)
-        master_handle.init_sava_master(source_node, self._member_list)
+        print('got master_handle')
+        master_handle.init_sava_master(args, self._member_list)
 
     def run(self):
         my_thread = Thread(target=self.send_heartbeat)
