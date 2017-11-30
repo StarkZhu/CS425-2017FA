@@ -215,12 +215,12 @@ class TCPServer():
     def init_sava_master(self, args, members):
         if self.sava_master is None:
             self.set_sava_master(SavaMaster())
-        self.sava_master.initialize(args, members)
+        self.sava_master.initialize(args, members, self._slave)
         return True
 
     def init_sava_worker(self, worker_id, args, workers):
         print('tcp worker init requested')
-        self.sava_worker.initialize(worker_id, args, workers)
+        self.sava_worker.initialize(worker_id, args, workers, self._slave)
         return True
 
     def init_next_iter(self):
@@ -234,6 +234,9 @@ class TCPServer():
     def finish_work(self):
         self.sava_worker.save_result()
         return True
+
+    def get_max_iter(self):
+        return self.sava_worker.get_max_iter()
 # ------------------------- end sava functions
 
 

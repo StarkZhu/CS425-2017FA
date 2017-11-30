@@ -11,3 +11,4 @@ SDFS_PREFIX = 'sdfs/'
 MP_DIR = '/home/cs425/MP3/'
 
 SAVA_GRAPH_FILE = 'GRAPH_FILE'
+SAVA_APP_PY = 'application.py'

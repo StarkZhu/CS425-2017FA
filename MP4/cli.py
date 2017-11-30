@@ -63,6 +63,7 @@ class CLI():
                     # example: save graph_file pgrk max_iter 
 
                     self._slave.put(args[1], SAVA_GRAPH_FILE)
+                    self._slave.put(args[2], SAVA_APP_PY)
                     self._slave.submit_job(args[2:])
 
             except:
