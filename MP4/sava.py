@@ -47,7 +47,7 @@ class SavaMaster():
         self.has_update = updated or self.has_update
 
         if self.finish_cnt == len(self._workers):
-            p = Thread(target=self.init_next_iter)
+            p = Thread(target=self.init_next_iter)  #msgin done
             p.start()
         elif self.finish_cnt == len(self._workers)*2:
             # work is complete
@@ -57,7 +57,7 @@ class SavaMaster():
 
             # call start iteration
             if self.has_update:
-                p = Thread(target=self.proceed_next_iter)
+                p = Thread(target=self.proceed_next_iter)   # calculation done
                 p.start()
             else:
                 p = Thread(target=self.finish)
@@ -124,6 +124,7 @@ class SavaMaster():
 
     def init_next_iter(self):
         for worker_ip in self._workers.values():
+            print('ask worker to gather', worker_ip)
             handle = get_tcp_client_handle(worker_ip)
             handle.init_next_iter()
 
@@ -176,6 +177,7 @@ class SavaWorker():
         reload(application)
         self.application = application.Application(args)
         self._max_iter = self.application.max_iter
+        self._iter_cnt = 0
         initial_values = self.application.init_values();
         self.load_graph(initial_values[0], initial_values[1])
 
