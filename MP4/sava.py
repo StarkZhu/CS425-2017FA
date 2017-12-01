@@ -20,36 +20,61 @@ class SavaMaster():
         self.application = None
         self._slave = None
 
-    def initialize(self, args, members, slave):
+        self.is_active = False
+        self.args = None
+
+    def initialize(self, args, members, slave, is_active):
         self._iter_cnt = 0
+        self.finish_cnt = 0
         self._slave = slave
+
+        if args is not None:
+            self.args = args
+
+        self.job_id = time.time()
         self.set_workers(members)
-        p = Thread(target=self.init_work, args=[args])
-        p.start()
+        self.is_active = is_active
+
+        if self.is_active:
+            p = Thread(target=self.init_work, args=[self.args])
+            p.start()
 
         self.start_time = time.time()
         print('Master Initialize Done')
 
-    def set_workers(self, members):
+    def calc_workers(self, members):
+        workers = {}
         cnt = 0
         for m in members:
             mid = int(m[0].split('.')[0].split('-')[-1])
             if mid <= 3:
                 continue
 
-            self._workers[str(cnt)] = m[0]
+            workers[str(cnt)] = m[0]
             cnt += 1
+        return workers
 
-    def finish_iteration(self, worker_id, updated):
+    def set_workers(self, members):
+        self._workers = self.calc_workers(members)
+
+    def finish_iteration(self, worker_id, updated, job_id):
+        if job_id != self.job_id:
+            return
+
         self.finish_cnt += 1
 
+        print('finish count: {} updated: {} '.format(self.finish_cnt, updated))
         print('worker %s finish iteration called' % worker_id)
         self.has_update = updated or self.has_update
 
         if self.finish_cnt == len(self._workers):
-            p = Thread(target=self.init_next_iter)  #msgin done
-            p.start()
+            print('active? ', self.is_active)
+            if self.is_active:
+                print('finish gather')
+                p = Thread(target=self.init_next_iter)  #msgin done
+                p.start()
         elif self.finish_cnt == len(self._workers)*2:
+            print('active? ', self.is_active)
             # work is complete
             print('current iteration %d' % self._iter_cnt)
             self._iter_cnt += 1
@@ -57,38 +82,15 @@ class SavaMaster():
 
             # call start iteration
             if self.has_update:
-                p = Thread(target=self.proceed_next_iter)   # calculation done
-                p.start()
+                if self.is_active:
+                    p = Thread(target=self.proceed_next_iter)   # calculation done
+                    p.start()
             else:
-                p = Thread(target=self.finish)
-                p.start()
+                if self.is_active:
+                    p = Thread(target=self.finish)
+                    p.start()
             self.has_update = False
-
-
-        '''
-        if self.max_iter == -1 and self._iter_cnt ==0:            
-            p = Thread(target=self.get_max_iter, args=[worker_id])
-            p.start()
-        elif self.finish_cnt == len(self._workers):
-            p = Thread(target=self.init_next_iter)
-            p.start()
-        elif self.finish_cnt == len(self._workers)*2:
-
-            # work is complete
-            print('current iteration %d' % self._iter_cnt)
-            self.finish_cnt = 0
-            self._iter_cnt += 1
-            
-            # call start iteration
-            print('max_iter:',  self.max_iter)
-            if (self._iter_cnt < 3 or (self.has_update and self._iter_cnt < self.max_iter)):
-                p = Thread(target=self.proceed_next_iter)
-                p.start()
-            else:
-                p = Thread(target=self.finish)
-                p.start()
-            self.has_update = False
-        '''
+        print('END OF FINISH ITERATION')
 
     def get_max_iter(self, worker_id):
         handle = get_tcp_client_handle(self._workers[worker_id])
@@ -142,32 +144,34 @@ class SavaMaster():
 
     def init_worker_thread(self, worker_id, worker_ip, args):
         handle = get_tcp_client_handle(worker_ip)
-        handle.init_sava_worker(worker_id, args, self._workers)
+        handle.init_sava_worker(worker_id, args, self._workers, self.job_id)
 
 
 class SavaWorker():
     def __init__(self):
         self.worker_id = ''
+        self.job_id = -1
+        self._lock = Lock()
+        self.peers = None
+        self.application = None
+        self._max_iter = -1
+        self._iter_cnt = 0
+        self.masters = [INTRODUCER, SAVA_STANDBY_MASTER]
+
+        
+
+    def initialize_thread(self, worker_id, args, workers, slave, job_id):
         # map node_number to list
         self._msgin = defaultdict(list)
         self._msgout = defaultdict(list)
         self._graph = defaultdict(list)
         self._nodeValue = {}
-        self._lock = Lock()
-        self.peers = None
-        self.master = INTRODUCER
-
-        self.application = None
         self.last_round_msgin = {}
         self.partition = {}
 
-        self._max_iter = -1
-        self._iter_cnt = 0
-
-    def initialize_thread(self, worker_id, args, workers, slave):
         self._slave = slave
-
         self.worker_id = worker_id
+        self.job_id = job_id
         self.set_peers(workers)
 
         print('Worker %s initializing' % self.worker_id)
@@ -183,15 +187,17 @@ class SavaWorker():
 
         print('worker init done')
 
-    def initialize(self, worker_id, args, workers, slave):
-        p = Thread(target=self.initialize_thread, args=[worker_id, args, workers, slave])
+    def initialize(self, worker_id, args, workers, slave, job_id):
+        p = Thread(target=self.initialize_thread, args=[worker_id, args, workers, slave, job_id])
         p.start()
 
     def get_max_iter(self):
         return self.application.max_iter
-        
+       
+    '''
     def set_master(self, master):
         self.master = master
+    '''
 
     def set_worker_id(self, id):
         self.worker_id = id
@@ -372,5 +378,12 @@ class SavaWorker():
         handle.sava_transfer_data(self._msgout[send_to_id])
 
     def reach_barrier(self, updated):
-        handle = get_tcp_client_handle(self.master)
-        handle.finish_iteration(self.worker_id, updated)
+        tmp = list(self.masters)
+        for master in tmp:
+            print('send barrier to: ', master)
+            try:
+                handle = get_tcp_client_handle(master)
+                handle.finish_iteration(self.worker_id, updated, self.job_id)
+            except ConnectionRefusedError:
+                self.masters.remove(master)
+                print('SAVA Master Failure detected ', master)

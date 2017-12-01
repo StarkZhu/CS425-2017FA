@@ -36,6 +36,7 @@ class Slave():
         self._lock = Lock()
         self._hb_lock = Lock()
 
+        self.sava_master = None
 
     def is_alive(self):
         return self._alive and len(self._member_list) >= MACHINE_NUM
@@ -131,6 +132,7 @@ class Slave():
             worker = Thread(target = self.fail_recover)
             worker.run()
 
+
     def fail_recover(self):
         '''
         check all existing files, if alive replica is less than 3, ask a good node to PUT the file to a new node, aka replicate the file, until 3 replica is reached
@@ -138,6 +140,24 @@ class Slave():
         time.sleep(HEARTBEAT_PERIOD*8)
         self._sdfs_master.update_member_list(self._member_list)
         start_time = time.time()
+
+
+        # check if myself is sava master
+        if self.sava_master is not None:
+            prev_workers = self.sava_master._workers
+            cur_workers = self.sava_master.calc_workers(self._member_list)
+            if len(cur_workers) < len(prev_workers) :
+                self._logger.info('TRUE failure detected')
+
+                self.sava_master.initialize(
+                    None, 
+                    self._member_list, 
+                    self, 
+                    self.sava_master.is_active
+                )
+
+                self._logger.info('Recover Done')
+            
 
         update_meta = self._sdfs_master.update_metadata(self._member_list)
         if len(update_meta) == 0: return
@@ -155,6 +175,10 @@ class Slave():
                 else:
                     good_node_handle.remote_put_to_replica(ip, SDFS_PREFIX + filename, filename, ver)
         self._logger.info("Repair done [{}s]".format(time.time() - start_time))
+
+
+
+
 
     def update_neighbors(self):
         self._hb_lock.acquire()
@@ -477,8 +501,17 @@ class Slave():
         if self._master != getfqdn() and self._vote_num > len(self._member_list) / 2:
             self._master = getfqdn()
             self._logger.info("I am voted to be the new master")
+
+            p = Thread(target=self.rebuild_sava_master)
+            p.start()
             p = Thread(target=self.rebuild_file_meta)
             p.start()
+
+    def rebuild_sava_master(self):
+        self.sava_master.is_active = True
+        self.sava_master.finish_cnt -= 1
+        self.sava_master.finish_iteration(-1, False)
+        self._logger.info("sava standby master online")
 
     def rebuild_file_meta(self):
         '''
@@ -527,7 +560,10 @@ class Slave():
     def submit_job(self, args):
         master_handle = get_tcp_client_handle(self._master)
         print('got master_handle')
-        master_handle.init_sava_master(args, self._member_list)
+        master_handle.init_sava_master(args, self._member_list, True)
+
+        master_handle = get_tcp_client_handle(SAVA_STANDBY_MASTER)
+        master_handle.init_sava_master(args, self._member_list, False)
 
     def run(self):
         my_thread = Thread(target=self.send_heartbeat)

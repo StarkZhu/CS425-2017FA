@@ -12,3 +12,4 @@ MP_DIR = '/home/cs425/MP3/'
 
 SAVA_GRAPH_FILE = 'GRAPH_FILE'
 SAVA_APP_PY = 'application.py'
+SAVA_STANDBY_MASTER = 'fa17-cs425-g29-02.cs.illinois.edu'

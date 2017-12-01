@@ -208,19 +208,21 @@ class TCPServer():
         self.sava_worker.store_to_msgin(msg)
         return True
 
-    def finish_iteration(self, worker_id, updated):
-        self.sava_master.finish_iteration(worker_id, updated)
+    def finish_iteration(self, worker_id, updated, job_id):
+        self.sava_master.finish_iteration(worker_id, updated, job_id)
         return True
 
-    def init_sava_master(self, args, members):
+    def init_sava_master(self, args, members, is_active):
         if self.sava_master is None:
             self.set_sava_master(SavaMaster())
-        self.sava_master.initialize(args, members, self._slave)
+            
+        self._slave.sava_master = self.sava_master
+        self.sava_master.initialize(args, members, self._slave, is_active)
         return True
 
-    def init_sava_worker(self, worker_id, args, workers):
+    def init_sava_worker(self, worker_id, args, workers, job_id):
         print('tcp worker init requested')
-        self.sava_worker.initialize(worker_id, args, workers, self._slave)
+        self.sava_worker.initialize(worker_id, args, workers, self._slave, job_id)
         return True
 
     def init_next_iter(self):
