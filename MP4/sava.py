@@ -31,7 +31,7 @@ class SavaMaster():
         if args is not None:
             self.args = args
 
-        self.job_id = time.time()
+        self.job_id = self.args[2]
         self.set_workers(members)
         self.is_active = is_active
 
@@ -59,6 +59,7 @@ class SavaMaster():
 
     def finish_iteration(self, worker_id, updated, job_id):
         if job_id != self.job_id:
+            print('JOB ID NOT MATCHING')
             return
 
         self.finish_cnt += 1
@@ -78,7 +79,6 @@ class SavaMaster():
             # work is complete
             print('current iteration %d' % self._iter_cnt)
             self._iter_cnt += 1
-            self.finish_cnt = 0
 
             # call start iteration
             if self.has_update:
@@ -90,6 +90,7 @@ class SavaMaster():
                     p = Thread(target=self.finish)
                     p.start()
             self.has_update = False
+            self.finish_cnt = 0
         print('END OF FINISH ITERATION')
 
     def get_max_iter(self, worker_id):
@@ -109,9 +110,18 @@ class SavaMaster():
     def get_final_result(self):
         # open a `thread` to gather result 
         result = {}
+        threads = []
         for worker_id in self._workers.keys():
             filename = '%s_sava_output' % worker_id
-            self._slave.get(filename, filename)
+            p = Thread(target=self._slave.get, args=[filename, filename])
+            p.start()
+            threads.append(p)
+
+        for p in threads:
+            p.join()
+
+        for worker_id in self._workers.keys():
+            filename = '%s_sava_output' % worker_id
             with open(filename) as fin:
                 for line in fin:
                     splits = line.strip().split(' ')

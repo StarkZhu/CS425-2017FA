@@ -146,6 +146,8 @@ class Slave():
         if self.sava_master is not None:
             prev_workers = self.sava_master._workers
             cur_workers = self.sava_master.calc_workers(self._member_list)
+
+            # TODO: It might be better to compare the failure set for true failure
             if len(cur_workers) < len(prev_workers) :
                 self._logger.info('TRUE failure detected')
 
@@ -510,7 +512,7 @@ class Slave():
     def rebuild_sava_master(self):
         self.sava_master.is_active = True
         self.sava_master.finish_cnt -= 1
-        self.sava_master.finish_iteration(-1, False)
+        self.sava_master.finish_iteration(-1, False, self.sava_master.job_id)
         self._logger.info("sava standby master online")
 
     def rebuild_file_meta(self):
