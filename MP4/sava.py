@@ -11,6 +11,8 @@ import time
 import sys
 import operator
 import zlib
+import os
+import getpass
 
 class SavaMaster():
     def __init__(self):
@@ -357,8 +359,6 @@ class SavaWorker():
                         nodeContrib[vertex],
                     )
 
-        
-
         print('calculate msg to send finished %fs' % (time.time() - cur_time))
         cur_time = time.time()
         threads = []
@@ -403,12 +403,28 @@ class SavaWorker():
             return
 
         cur_time = time.time()
-        compressed = zlib.compress(encode_obj(self._msgout[send_to_id]), level=-1)
-        print(send_to_id, ' compress takes %fs' % (time.time() - cur_time))
-        # print(send_to_id, 'compress size: ', len(compressed))
+        # compressed = zlib.compress(encode_obj(self._msgout[send_to_id]), level=-1)
+        '''
+        filename = 'msgto_%s.msg' % send_to_id
+        with open(filename,'w') as fout:
+            fout.write(str(self._msgout[send_to_id]))
+        print('write file takes ', time.time() - cur_time)
+        cur_time = time.time()
+
+        cmd = 'scp {} {}@{}:{}'.format(
+                filename,
+                getpass.getuser(),
+                self.peers[send_to_id],
+                MP_DIR + MSG_DIR + 'msgfrom_%s.msg' % self.worker_id
+            )
+        os.system(cmd)
+        print('send file takes ', time.time() - cur_time)
+        '''
+        # print(send_to_id, ' compress takes %fs' % (time.time() - cur_time))
         handle = get_tcp_client_handle(self.peers[send_to_id])
         # handle.sava_transfer_data(self._msgout[send_to_id])
         handle.sava_transfer_data(xmlrpc.client.Binary(compressed).data)
+        # handle.sava_transfer_data(self.worker_id)
 
     def reach_barrier(self, updated):
         tmp = list(self.masters)

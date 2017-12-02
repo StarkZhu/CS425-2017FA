@@ -17,7 +17,8 @@ def run_tcp_server(tcp_obj):
 
 if __name__ == '__main__':
     logging.basicConfig(filename='mp4.log',level=logging.INFO, filemode='w')
-    os.system("rm sdfs/*")
+    os.system("rm -f sdfs/*")
+    os.system("rm -rf msg_dir; mkdir msg_dir; chmod 777 msg_dir")
     os.system("chmod 777 mp4.log")
 
     console = logging.StreamHandler()

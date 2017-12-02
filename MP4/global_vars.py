@@ -8,7 +8,8 @@ UDP_LOST_RATE = 0
 UDP_PORT_NUM = 9000
 INTRODUCER = 'fa17-cs425-g29-01.cs.illinois.edu'
 SDFS_PREFIX = 'sdfs/'
-MP_DIR = '/home/cs425/MP3/'
+MP_DIR = '/home/cs425/MP4/'
+MSG_DIR = 'msg_dir/'
 
 SAVA_GRAPH_FILE = 'GRAPH_FILE'
 SAVA_APP_PY = 'application.py'

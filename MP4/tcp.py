@@ -210,6 +210,14 @@ class TCPServer():
         decompressed = decode_obj(zlib.decompress(msg.data))
         self.sava_worker.store_to_msgin(decompressed)
         return True
+        
+    # def sava_transfer_data(self, msg_from):
+    #     cur_time = time.time()
+    #     with open(MSG_DIR + 'msgfrom_%s.msg' % msg_from) as fin:
+    #         msgin = eval(fin.read())
+    #     print('read file takes',  time.time() - cur_time)
+    #     self.sava_worker.store_to_msgin(msgin)
+    #     return True
 
     def finish_iteration(self, worker_id, updated, job_id):
         self.sava_master.finish_iteration(worker_id, updated, job_id)
