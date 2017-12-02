@@ -10,6 +10,7 @@ import base64
 from timeout import Timeout
 import time
 import subprocess
+import zlib
 
 # Restrict to a particular path.
 class RequestHandler(SimpleXMLRPCRequestHandler):
@@ -205,7 +206,9 @@ class TCPServer():
         self.sava_master = sava_master
 
     def sava_transfer_data(self, msg):
-        self.sava_worker.store_to_msgin(msg)
+        # msg here is zlib compressed msg
+        decompressed = decode_obj(zlib.decompress(msg.data))
+        self.sava_worker.store_to_msgin(decompressed)
         return True
 
     def finish_iteration(self, worker_id, updated, job_id):

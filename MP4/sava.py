@@ -6,9 +6,11 @@ from collections import defaultdict
 from collections import deque
 from importlib import reload
 
+import xmlrpc.client
 import time
 import sys
 import operator
+import zlib
 
 class SavaMaster():
     def __init__(self):
@@ -40,6 +42,7 @@ class SavaMaster():
             p.start()
 
         self.start_time = time.time()
+        self.iter_time = time.time()
         print('Master Initialize Done')
 
     def calc_workers(self, members):
@@ -64,20 +67,25 @@ class SavaMaster():
 
         self.finish_cnt += 1
 
-        print('finish count: {} updated: {} '.format(self.finish_cnt, updated))
-        print('worker %s finish iteration called' % worker_id)
+        # print('finish count: {} updated: {} '.format(self.finish_cnt, updated))
+        # print('worker %s finish iteration called' % worker_id)
         self.has_update = updated or self.has_update
 
         if self.finish_cnt == len(self._workers):
-            print('active? ', self.is_active)
+            # print('active? ', self.is_active)
+            print('Aggregate and Scatter phase takes {}s'.format(time.time() - self.iter_time))
             if self.is_active:
-                print('finish gather')
+                # print('finish gather')
                 p = Thread(target=self.init_next_iter)  #msgin done
                 p.start()
+
+            
+
         elif self.finish_cnt == len(self._workers)*2:
-            print('active? ', self.is_active)
+            # print('active? ', self.is_active)
             # work is complete
-            print('current iteration %d' % self._iter_cnt)
+            # print('current iteration %d' % self._iter_cnt)
+            print('Iteration {} takes {}s'.format(self._iter_cnt, time.time() - self.iter_time))
             self._iter_cnt += 1
 
             # call start iteration
@@ -91,7 +99,11 @@ class SavaMaster():
                     p.start()
             self.has_update = False
             self.finish_cnt = 0
-        print('END OF FINISH ITERATION')
+
+            
+            self.iter_time = time.time()
+
+        # print('END OF FINISH ITERATION')
 
     def get_max_iter(self, worker_id):
         handle = get_tcp_client_handle(self._workers[worker_id])
@@ -136,7 +148,7 @@ class SavaMaster():
 
     def init_next_iter(self):
         for worker_ip in self._workers.values():
-            print('ask worker to gather', worker_ip)
+            # print('ask worker to gather', worker_ip)
             handle = get_tcp_client_handle(worker_ip)
             handle.init_next_iter()
 
@@ -236,11 +248,9 @@ class SavaWorker():
                 self._graph[v1].append(v2)
                 self._graph[v2].append(v1)
 
-        print('loading graph DONE takes {}s'.format(time.time() - cur_time))
-
-        cur_time = time.time()
+        # print('loading graph DONE takes {}s'.format(time.time() - cur_time))
+        # cur_time = time.time()
         self.bfs_partition()
-        print('partition DONE takes {}s'.format(time.time() - cur_time))
 
         # initialize values 
         for node in self._graph.keys():
@@ -253,6 +263,9 @@ class SavaWorker():
                     print('node {} is initialized to be {}'.format(node, init_value[node]))
                 else:
                     self._nodeValue[node] = default_value
+
+        
+        print('loading & partition DONE takes {}s'.format(time.time() - cur_time))
 
         self.reach_barrier(True)
 
@@ -282,7 +295,7 @@ class SavaWorker():
         for i, vertex in enumerate(sorted_nodes):
             self.partition[vertex] = int(i * len(self.peers) / len(sorted_nodes))
 
-        print(len(self.partition))
+        # print(len(self.partition))
 
     def node_belong_to(self, node):
         return str(self.partition[node])
@@ -321,18 +334,20 @@ class SavaWorker():
         p.start()
     
     def process_thead(self):
-        
+        cur_time = time.time()
+
         nodeValue, nodeContrib = self.application.process(
             self.last_round_msgin, 
             self._nodeValue, 
             self._graph
         )
 
+        print('application specific calculation finished %fs' % (time.time() - cur_time))
+        cur_time = time.time()
+
         for vertex in nodeContrib.keys():
             for neighbor in self._graph[vertex]:
                 send_to_id = self.node_belong_to(neighbor)
-
-
 
                 if neighbor not in self._msgout[send_to_id]:
                     self._msgout[send_to_id][neighbor] = [nodeContrib[vertex]]
@@ -342,9 +357,10 @@ class SavaWorker():
                         nodeContrib[vertex],
                     )
 
-        cur_time = time.time()
+        
 
-        print('calculation finished')
+        print('calculate msg to send finished %fs' % (time.time() - cur_time))
+        cur_time = time.time()
         threads = []
         for send_to_id in self._msgout.keys():
             p = Thread(target=self.send_msg_thread, args=[send_to_id])
@@ -355,7 +371,7 @@ class SavaWorker():
             p.join()
 
         print('send finished, takes {}s'.format(time.time() - cur_time))     
-        cur_time = time.time()
+        # cur_time = time.time()
 
         self._iter_cnt += 1
 
@@ -363,7 +379,7 @@ class SavaWorker():
             self.reach_barrier(False)
         else:
             self.reach_barrier(True)
-        print('wait for barrier takes{}s'.format(time.time() - cur_time))
+        # print('wait for barrier takes{}s'.format(time.time() - cur_time))
 
 
     def gather(self):
@@ -371,7 +387,7 @@ class SavaWorker():
         p.start()
 
     def gather_msg(self):
-        print('start gather msg')
+        # print('start gather msg')
         self._msgout = defaultdict(dict)
         self._lock.acquire()
         self.last_round_msgin = self._msgin
@@ -380,17 +396,24 @@ class SavaWorker():
         self.reach_barrier(False)    
 
     def send_msg_thread(self, send_to_id):
-        print('msg send to {} size: {}'.format(send_to_id, sys.getsizeof(str(self._msgout[send_to_id]))))
+        # print('msg send to {} size: {}'.format(send_to_id, sys.getsizeof(str(self._msgout[send_to_id]))))
+        
         if send_to_id == self.worker_id:
             self.store_to_msgin(self._msgout[send_to_id])
             return
+
+        cur_time = time.time()
+        compressed = zlib.compress(encode_obj(self._msgout[send_to_id]), level=-1)
+        print(send_to_id, ' compress takes %fs' % (time.time() - cur_time))
+        # print(send_to_id, 'compress size: ', len(compressed))
         handle = get_tcp_client_handle(self.peers[send_to_id])
-        handle.sava_transfer_data(self._msgout[send_to_id])
+        # handle.sava_transfer_data(self._msgout[send_to_id])
+        handle.sava_transfer_data(xmlrpc.client.Binary(compressed).data)
 
     def reach_barrier(self, updated):
         tmp = list(self.masters)
         for master in tmp:
-            print('send barrier to: ', master)
+            # print('send barrier to: ', master)
             try:
                 handle = get_tcp_client_handle(master)
                 handle.finish_iteration(self.worker_id, updated, self.job_id)
