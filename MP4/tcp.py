@@ -207,8 +207,8 @@ class TCPServer():
 
     def sava_transfer_data(self, msg):
         # msg here is zlib compressed msg
-        decompressed = decode_obj(zlib.decompress(msg.data))
-        self.sava_worker.store_to_msgin(decompressed)
+        msg = decode_obj(zlib.decompress(msg.data))
+        self.sava_worker.store_to_msgin(msg)
         return True
         
     # def sava_transfer_data(self, msg_from):
@@ -228,6 +228,7 @@ class TCPServer():
             self.set_sava_master(SavaMaster(self._logger))
             
         self._slave.sava_master = self.sava_master
+        self.sava_master.finished = False # new job received
         self.sava_master.initialize(args, members, self._slave, is_active)
         return True
 

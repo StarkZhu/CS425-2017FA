@@ -16,13 +16,23 @@ def run_tcp_server(tcp_obj):
     server.serve_forever()
 
 if __name__ == '__main__':
-    logging.basicConfig(filename='mp4.log',level=logging.INFO, filemode='w')
+    logging.basicConfig(
+        filename='mp4.log',
+        level=logging.INFO, 
+        filemode='w',
+        format='%(asctime)s %(message)s', 
+        datefmt='%H:%M:%S'
+    )
     os.system("rm -f sdfs/*")
     os.system("rm -rf msg_dir; mkdir msg_dir; chmod 777 msg_dir")
     os.system("chmod 777 mp4.log")
-
+    logging.info('system started')
+    
     console = logging.StreamHandler()
+    formatter = logging.Formatter('%(asctime)s %(message)s', datefmt='%H:%M:%S')
+    console.setFormatter(formatter)
     console.setLevel(logging.DEBUG)
+
     logging.getLogger('').addHandler(console)
 
     sdfs_master = SDFS_Master()

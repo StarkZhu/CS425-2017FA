@@ -368,8 +368,11 @@ class Slave():
         self._lock.release()
 
     def get_from_replica(self, target_ip, sdfs_filename, ver):
-        replica_handle = get_tcp_client_handle(target_ip)
-        file_data = replica_handle.get_file_data(sdfs_filename, ver)
+        if target_ip == getfqdn():
+            file_data = self.get_file_data(sdfs_filename, ver)
+        else:
+            replica_handle = get_tcp_client_handle(target_ip)
+            file_data = replica_handle.get_file_data(sdfs_filename, ver)
         self.work_done(sdfs_filename, file_data)
         return file_data
     

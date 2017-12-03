@@ -27,11 +27,17 @@ class SavaMaster():
         self.is_active = False
         self.args = None
         self._logger = logger
+        self.finished = False
 
     def initialize(self, args, members, slave, is_active):
+        if self.finished:
+            return
+
+        self._logger.info('job received at master')
         self._iter_cnt = 0
         self.finish_cnt = 0
         self._slave = slave
+        # if current job finished
 
         if args is not None:
             self.args = args
@@ -70,6 +76,9 @@ class SavaMaster():
 
         self.finish_cnt += 1
 
+        if self.finish_cnt <= len(self._workers):
+            self._logger.info('Iter {}@ Worker{} completed'.format(self._iter_cnt, worker_id))
+
         # self._logger.info('finish count: {} updated: {} '.format(self.finish_cnt, updated))
         # self._logger.info('worker %s finish iteration called' % worker_id)
         self.has_update = updated or self.has_update
@@ -97,6 +106,7 @@ class SavaMaster():
                     p = Thread(target=self.proceed_next_iter)   # calculation done
                     p.start()
             else:
+                self._logger.info('taking time {}s'.format(time.time() - self.start_time))
                 if self.is_active:
                     p = Thread(target=self.finish)
                     p.start()
@@ -113,11 +123,12 @@ class SavaMaster():
         self.max_iter = handle.get_max_iter()
             
     def finish(self):
-        self._logger.info('taking time {}s'.format(time.time() - self.start_time))
+        # self._logger.info('taking time {}s'.format(time.time() - self.start_time))
         for worker_ip in self._workers.values():
             handle = get_tcp_client_handle(worker_ip)
             handle.finish_work()
 
+        self.finished = True
         p = Thread(target=self.get_final_result)
         p.start()
 
@@ -213,6 +224,7 @@ class SavaWorker():
         self._logger.info('worker init done')
 
     def initialize(self, worker_id, args, workers, slave, job_id):
+        self._logger.info('job received at worker')
         p = Thread(target=self.initialize_thread, args=[worker_id, args, workers, slave, job_id])
         p.start()
 
@@ -404,7 +416,8 @@ class SavaWorker():
             return
 
         cur_time = time.time()
-        compressed = zlib.compress(encode_obj(self._msgout[send_to_id]), level=-1)
+
+        compressed = zlib.compress(encode_obj(self._msgout[send_to_id]), level=0)
         '''
         filename = 'msgto_%s.msg' % send_to_id
         with open(filename,'w') as fout:
