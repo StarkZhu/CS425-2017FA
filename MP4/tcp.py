@@ -225,7 +225,7 @@ class TCPServer():
 
     def init_sava_master(self, args, members, is_active):
         if self.sava_master is None:
-            self.set_sava_master(SavaMaster())
+            self.set_sava_master(SavaMaster(self._logger))
             
         self._slave.sava_master = self.sava_master
         self.sava_master.initialize(args, members, self._slave, is_active)

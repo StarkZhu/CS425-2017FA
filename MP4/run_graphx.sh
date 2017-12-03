@@ -1,5 +1,6 @@
+cd ../spark-2.2.0-bin-hadoop2.7;
 $SPARK_HOME/bin/spark-submit \
---class org.apache.spark.examples.SparkPageRank \
+--class org.apache.spark.examples.graphx.SSSPExample \
 --master spark://fa17-cs425-g29-01.cs.illinois.edu:7077 \
 --deploy-mode cluster \
-$SPARK_HOME/examples/jars/spark-examples_2.11-2.2.0.jar /home/cs425/MP4/graph_for_spark.txt 20
+original-spark-examples_2.11-2.2.0.jar

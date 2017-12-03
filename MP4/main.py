@@ -40,7 +40,7 @@ if __name__ == '__main__':
 
 
     tcpserver = TCPServer(slave, sdfs_master, logging)
-    sava_worker = SavaWorker()
+    sava_worker = SavaWorker(logging)
     tcpserver.set_sava_worker(sava_worker)
     run_tcp_server(tcpserver)
 
