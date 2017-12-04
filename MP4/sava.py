@@ -230,11 +230,6 @@ class SavaWorker():
 
     def get_max_iter(self):
         return self.application.max_iter
-       
-    '''
-    def set_master(self, master):
-        self.master = master
-    '''
 
     def set_worker_id(self, id):
         self.worker_id = id
@@ -386,7 +381,13 @@ class SavaWorker():
         self._logger.info('send finished, takes {}s'.format(time.time() - cur_time))     
         # cur_time = time.time()
 
+
         self._iter_cnt += 1
+
+        self._logger.info('job iter finished at worker; current iter {}/{}'.format(
+            self._iter_cnt,
+            self._max_iter,
+        ))
 
         if (self._iter_cnt > 3 and len(nodeContrib) <= 1) or self._iter_cnt >= self._max_iter:
             self.reach_barrier(False)

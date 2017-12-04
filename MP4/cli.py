@@ -64,6 +64,7 @@ class CLI():
 
                     self._slave.put(args[1], SAVA_GRAPH_FILE)
                     self._slave.put(args[2], SAVA_APP_PY)
+                    time.sleep(1)
 
                     passin_args = args[2:]
                     passin_args.append(time.time())

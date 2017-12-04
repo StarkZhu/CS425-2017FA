@@ -1,10 +1,9 @@
-This is the implementation of MP3. 
+This is the implementation of MP4. 
 
 ===START THE NODE===
 
-Assuming running in MP3/ folder
+Assuming running in MP4/ folder
 `python3.6 main.py`
-
 
 
 ===SUPPORTED COMMAND===
@@ -18,15 +17,16 @@ Assuming running in MP3/ folder
 * delete sdfsfilename
 * ls sdfsfilename
 * store
+* sava graph_file app.py params 
 
 ===SETUP===
 * You may need to run ../setup.sh once to setup. 
 
 ===LOGS===
 
-- Logs will be redirected to mp2.log
-- Grep leavers: `python3.6 client.py /home/cs425/MP2/mp2.log left`
-- Grep join: `python3.6 client.py /home/cs425/MP2/mp2.log joining`
-- Grep offline/crash: `python3.6 client.py /home/cs425/MP2/mp2.log offline`
+- Logs will be redirected to mp4.log
+- Grep leavers: `python3.6 client.py /home/cs425/MP4/mp4.log left`
+- Grep join: `python3.6 client.py /home/cs425/MP4/mp4.log joining`
+- Grep offline/crash: `python3.6 client.py /home/cs425/MP4/mp4.log offline`
 
 Please let us know if you have any question. {dlei5, qzhu3}@illinois.edu

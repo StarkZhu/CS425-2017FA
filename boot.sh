@@ -1,4 +1,4 @@
-for i in `seq 8 9`
+for i in `seq 4 9`
 do
 #    ssh-copy-id ${USER}@fa17-cs425-g29-0${i}.cs.illinois.edu
     ssh -n -f ${USER}@fa17-cs425-g29-0${i}.cs.illinois.edu "sh -c 'cd /home/cs425/MP4; nohup python3.6 main.py > /dev/null 2>&1 &'"
