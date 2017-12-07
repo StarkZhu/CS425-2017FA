@@ -33,6 +33,7 @@ class SavaMaster():
         if self.finished:
             return
 
+        # init variables
         self._logger.info('job received at master')
         self._iter_cnt = 0
         self.finish_cnt = 0
@@ -43,9 +44,11 @@ class SavaMaster():
             self.args = args
 
         self.job_id = self.args[2]
+        #print('job_id', self.job_id)
         self.set_workers(members)
         self.is_active = is_active
 
+        #print('Active?', self.is_active)
         if self.is_active:
             p = Thread(target=self.init_work, args=[self.args])
             p.start()
@@ -55,6 +58,7 @@ class SavaMaster():
         self._logger.info('Master Initialize Done')
 
     def calc_workers(self, members):
+        # calculate workers for sava
         workers = {}
         cnt = 0
         for m in members:
@@ -67,9 +71,18 @@ class SavaMaster():
         return workers
 
     def set_workers(self, members):
+        # func to set worker
         self._workers = self.calc_workers(members)
 
     def finish_iteration(self, worker_id, updated, job_id):
+        # aggregate results from workers
+        # print('{} Received Job ID {} Self Job ID {} finish_cnt {}'.format(
+        #     worker_id,
+        #     job_id,
+        #     self.job_id,
+        #     self.finish_cnt + 1,
+        # ))
+
         if job_id != self.job_id:
             self._logger.info('JOB ID NOT MATCHING')
             return
@@ -119,10 +132,12 @@ class SavaMaster():
         # self._logger.info('END OF FINISH ITERATION')
 
     def get_max_iter(self, worker_id):
+        # get number of iter to run
         handle = get_tcp_client_handle(self._workers[worker_id])
         self.max_iter = handle.get_max_iter()
             
     def finish(self):
+        # finish up function; prep result to show
         # self._logger.info('taking time {}s'.format(time.time() - self.start_time))
         for worker_ip in self._workers.values():
             handle = get_tcp_client_handle(worker_ip)
@@ -161,24 +176,27 @@ class SavaMaster():
                 fout.write('{} {}\n'.format(e[0], e[1]))
 
     def init_next_iter(self):
+        # kick off next iteration
         for worker_ip in self._workers.values():
             # self._logger.info('ask worker to gather', worker_ip)
             handle = get_tcp_client_handle(worker_ip)
             handle.init_next_iter()
 
     def proceed_next_iter(self):
+        # kick off the process of next iteration
         for worker_ip in self._workers.values():
             handle = get_tcp_client_handle(worker_ip)
             handle.proceed_next_iter()
 
     def init_work(self, args):
+        # initialize workers
         self._logger.info('master start initializing')
-        self._logger.info(self._workers)
         for worker_id, worker_ip in self._workers.items():
             p = Thread(target=self.init_worker_thread, args=[worker_id, worker_ip, args])
             p.start()
 
     def init_worker_thread(self, worker_id, worker_ip, args):
+        # threads to do the work
         handle = get_tcp_client_handle(worker_ip)
         handle.init_sava_worker(worker_id, args, self._workers, self.job_id)
 
@@ -197,7 +215,11 @@ class SavaWorker():
         self._logger = logging
 
     def initialize_thread(self, worker_id, args, workers, slave, job_id):
+        # thread to do the work
+        #print('job_id', job_id)
         # map node_number to list
+        # self._logger.info('Worker %s initializing' % self.worker_id)
+        
         self._msgin = defaultdict(list)
         self._msgout = defaultdict(list)
         self._graph = defaultdict(list)
@@ -224,6 +246,7 @@ class SavaWorker():
         self._logger.info('worker init done')
 
     def initialize(self, worker_id, args, workers, slave, job_id):
+        # worker initialize function
         self._logger.info('job received at worker')
         p = Thread(target=self.initialize_thread, args=[worker_id, args, workers, slave, job_id])
         p.start()
@@ -239,9 +262,11 @@ class SavaWorker():
         self.peers = peers
 
     def load_graph(self, init_value, default_value):
+        # load graph from sdfs 
         num_nodes = 0
         num_edges = 0
 
+        job_id = self.job_id
         self._logger.info('loading graph STARTED')
         cur_time = time.time()
         # get graph from sdfs 
@@ -277,10 +302,11 @@ class SavaWorker():
         
         self._logger.info('loading & partition DONE takes {}s'.format(time.time() - cur_time))
 
-        self.reach_barrier(True)
+        self.reach_barrier(True, job_id)
 
 
     def bfs_partition(self):
+        # partition function 
         q = deque()
         sorted_nodes = []
 
@@ -311,6 +337,10 @@ class SavaWorker():
         return str(self.partition[node])
 
     def store_to_msgin_thread(self, msg):
+        if msg['job_id'] < self.job_id:
+            return
+
+        msg = msg['msg']
         self._lock.acquire()
         for node in msg.keys():
             self._msgin[node] += msg[node]
@@ -321,6 +351,7 @@ class SavaWorker():
         p.start()
 
     def save_result(self):
+        # save result to local & sdfs
         sorted_result = sorted(
             self._nodeValue.items(), 
             reverse=True, 
@@ -344,6 +375,8 @@ class SavaWorker():
         p.start()
     
     def process_thead(self):
+        # thread to process 
+        job_id = self.job_id
         cur_time = time.time()
 
         nodeValue, nodeContrib = self.application.process(
@@ -369,9 +402,11 @@ class SavaWorker():
 
         self._logger.info('calculate msg to send finished %fs' % (time.time() - cur_time))
         cur_time = time.time()
+
+
         threads = []
         for send_to_id in self._msgout.keys():
-            p = Thread(target=self.send_msg_thread, args=[send_to_id])
+            p = Thread(target=self.send_msg_thread, args=[send_to_id, job_id])
             p.start()
             threads.append(p)
 
@@ -384,15 +419,15 @@ class SavaWorker():
 
         self._iter_cnt += 1
 
-        self._logger.info('job iter finished at worker; current iter {}/{}'.format(
+        self._logger.info('job iter finished at worker; current iter {} {}'.format(
             self._iter_cnt,
             self._max_iter,
         ))
 
         if (self._iter_cnt > 3 and len(nodeContrib) <= 1) or self._iter_cnt >= self._max_iter:
-            self.reach_barrier(False)
+            self.reach_barrier(False, job_id)
         else:
-            self.reach_barrier(True)
+            self.reach_barrier(True, job_id)
         # self._logger.info('wait for barrier takes{}s'.format(time.time() - cur_time))
 
 
@@ -401,53 +436,41 @@ class SavaWorker():
         p.start()
 
     def gather_msg(self):
+        # thread to gather msg
         # self._logger.info('start gather msg')
+        job_id = self.job_id
         self._msgout = defaultdict(dict)
         self._lock.acquire()
         self.last_round_msgin = self._msgin
         self._msgin = defaultdict(list)
         self._lock.release()
-        self.reach_barrier(False)    
+        self.reach_barrier(False, job_id)    
 
-    def send_msg_thread(self, send_to_id):
-        # self._logger.info('msg send to {} size: {}'.format(send_to_id, sys.getsizeof(str(self._msgout[send_to_id]))))
-        
+    def send_msg_thread(self, send_to_id, job_id):
+        # thread to send msg
+        msg = {
+            'job_id': job_id,
+            'msg': self._msgout[send_to_id]
+        }
+
         if send_to_id == self.worker_id:
-            self.store_to_msgin(self._msgout[send_to_id])
+            self.store_to_msgin(msg)
             return
 
         cur_time = time.time()
 
-        compressed = zlib.compress(encode_obj(self._msgout[send_to_id]), level=0)
-        '''
-        filename = 'msgto_%s.msg' % send_to_id
-        with open(filename,'w') as fout:
-            fout.write(str(self._msgout[send_to_id]))
-        self._logger.info('write file takes ', time.time() - cur_time)
-        cur_time = time.time()
-
-        cmd = 'scp {} {}@{}:{}'.format(
-                filename,
-                getpass.getuser(),
-                self.peers[send_to_id],
-                MP_DIR + MSG_DIR + 'msgfrom_%s.msg' % self.worker_id
-            )
-        os.system(cmd)
-        self._logger.info('send file takes ', time.time() - cur_time)
-        '''
-        # self._logger.info(send_to_id, ' compress takes %fs' % (time.time() - cur_time))
+        compressed = zlib.compress(encode_obj(msg), level=0)
         handle = get_tcp_client_handle(self.peers[send_to_id])
-        # handle.sava_transfer_data(self._msgout[send_to_id])
         handle.sava_transfer_data(xmlrpc.client.Binary(compressed).data)
-        # handle.sava_transfer_data(self.worker_id)
 
-    def reach_barrier(self, updated):
+    def reach_barrier(self, updated, job_id):
+        # called once reach barrier
         tmp = list(self.masters)
         for master in tmp:
             # self._logger.info('send barrier to: ', master)
             try:
                 handle = get_tcp_client_handle(master)
-                handle.finish_iteration(self.worker_id, updated, self.job_id)
+                handle.finish_iteration(self.worker_id, updated, job_id)
             except ConnectionRefusedError:
                 self.masters.remove(master)
                 self._logger.info('SAVA Master Failure detected ', master)

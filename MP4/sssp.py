@@ -3,6 +3,7 @@ import time
 
 class Application():
     def __init__(self, args):
+        print('args', args)
         self.source_node = args[1]
         self.initial_value = float('inf')
         self.max_iter = float('inf')

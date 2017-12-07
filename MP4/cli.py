@@ -67,7 +67,8 @@ class CLI():
                     time.sleep(1)
 
                     passin_args = args[2:]
-                    passin_args.append(time.time())
+
+                    passin_args.append(0)
                     self._slave.submit_job(passin_args)
 
             except:

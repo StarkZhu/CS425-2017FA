@@ -36,7 +36,9 @@ class Slave():
         self._lock = Lock()
         self._hb_lock = Lock()
 
+        self._repair_lock = Lock()
         self.sava_master = None
+        self.fail_cnt = 0
 
     def is_alive(self):
         return self._alive and len(self._member_list) >= MACHINE_NUM
@@ -130,7 +132,7 @@ class Slave():
         self._sdfs_master.update_member_list(self._member_list)
         if need_update:
             worker = Thread(target = self.fail_recover)
-            worker.run()
+            worker.start()
 
 
     def fail_recover(self):
@@ -138,28 +140,36 @@ class Slave():
         check all existing files, if alive replica is less than 3, ask a good node to PUT the file to a new node, aka replicate the file, until 3 replica is reached
         '''
         time.sleep(HEARTBEAT_PERIOD*8)
+
+        self._repair_lock.acquire()
         self._sdfs_master.update_member_list(self._member_list)
         start_time = time.time()
-
 
         # check if myself is sava master
         if self.sava_master is not None:
             prev_workers = self.sava_master._workers
             cur_workers = self.sava_master.calc_workers(self._member_list)
+            # print('prev:', prev_workers)
+            # print('cur:', cur_workers)
 
             # TODO: It might be better to compare the failure set for true failure
             if len(cur_workers) < len(prev_workers) :
                 self._logger.info('TRUE failure detected')
 
+                passin_args = list(self.sava_master.args)
+                self.fail_cnt += 1
+                passin_args[2] = self.fail_cnt
+                print('USING JOBID ', passin_args[2])
+
                 self.sava_master.initialize(
-                    None, 
+                    passin_args, 
                     self._member_list, 
                     self, 
                     self.sava_master.is_active
                 )
 
                 self._logger.info('Recover Done')
-            
+        self._repair_lock.release()
 
         update_meta = self._sdfs_master.update_metadata(self._member_list)
         if len(update_meta) == 0: return
